@@ -1,0 +1,236 @@
+﻿<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Lucky Flux</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <div class="noise"></div>
+    <div class="aurora aurora-left"></div>
+    <div class="aurora aurora-right"></div>
+
+    <main class="page-shell">
+      <header class="topbar">
+        <div class="brand">
+          <div class="brand-mark">LF</div>
+          <div>
+            <p class="brand-kicker">Arcade Scratchroom</p>
+            <h1>Lucky Flux</h1>
+          </div>
+        </div>
+
+        <div class="topbar-actions">
+          <button id="connectButton" class="button button-ghost">Connect Wallet</button>
+        </div>
+      </header>
+
+      <section class="hero-grid">
+        <article class="hero-card panel glow-panel">
+          <div class="hero-copy">
+            <p class="eyebrow">Live Round</p>
+            <h2>Scratch the lacquer. Chase the jackpot.</h2>
+            <p class="hero-body">
+              Buy a ticket, wait for your card to finalize, then rip the foil with your mouse and cash out on a winning hit.
+            </p>
+            <div class="hero-actions">
+              <button id="buyButton" class="button button-primary">Buy Ticket</button>
+              <button id="openScratchButton" class="button button-secondary" disabled>Open Ticket</button>
+            </div>
+          </div>
+
+          <div class="hero-machine">
+            <div class="machine-orbit orbit-a"></div>
+            <div class="machine-orbit orbit-b"></div>
+            <div class="machine-ticket">
+              <span class="ticket-flare"></span>
+              <p class="ticket-mini-kicker">Current Ticket</p>
+              <strong id="machineTicketTitle">No live ticket</strong>
+              <p id="machineTicketBody">Connect your wallet and mint a ticket to start a run.</p>
+              <div class="machine-pills">
+                <span id="machineStatusPill" class="pill">Idle</span>
+                <span id="machinePrizePill" class="pill pill-muted">No prize yet</span>
+              </div>
+            </div>
+          </div>
+        </article>
+
+        <aside class="control-stack">
+          <article class="panel stat-panel">
+            <p class="eyebrow">Player Session</p>
+            <div class="stat-grid">
+              <div>
+                <span>Wallet</span>
+                <strong id="walletValue">-</strong>
+              </div>
+              <div>
+                <span>Connected Network</span>
+                <strong id="chainValue">-</strong>
+              </div>
+              <div>
+                <span>Ticket Price</span>
+                <strong id="ticketPriceValue">-</strong>
+              </div>
+              <div>
+                <span>Round</span>
+                <strong id="roundValue">-</strong>
+              </div>
+            </div>
+          </article>
+
+          <article class="panel action-panel">
+            <div class="action-head">
+              <div>
+                <p class="eyebrow">Run Status</p>
+                <h3 id="statusHeadline">Waiting for wallet</h3>
+              </div>
+              <button id="refreshButton" class="icon-button" aria-label="Refresh status">?</button>
+            </div>
+            <p id="statusMessage" class="action-copy">Connect a wallet to inspect your latest ticket.</p>
+            <div class="progress-wrap">
+              <div class="progress-track">
+                <div id="flowProgressFill" class="progress-fill"></div>
+              </div>
+              <strong id="flowProgressLabel">0%</strong>
+            </div>
+            <ol id="timeline" class="timeline"></ol>
+          </article>
+        </aside>
+      </section>
+
+      <section class="dashboard-grid">
+        <article class="panel current-ticket-panel">
+          <div class="panel-headline">
+            <div>
+              <p class="eyebrow">Your Ticket</p>
+              <h3 id="ticketPanelTitle">No ticket minted</h3>
+            </div>
+            <span id="ticketBadge" class="badge">No ticket</span>
+          </div>
+
+          <div class="ticket-meta-grid">
+            <div>
+              <span>Ticket ID</span>
+              <strong id="ticketIdValue">-</strong>
+            </div>
+            <div>
+              <span>Status</span>
+              <strong id="destinationStatusValue">-</strong>
+            </div>
+            <div>
+              <span>Request ID</span>
+              <strong id="requestIdValue">-</strong>
+            </div>
+            <div>
+              <span>Prize Tier</span>
+              <strong id="resultTier">-</strong>
+            </div>
+            <div>
+              <span>Payout</span>
+              <strong id="resultPayout">-</strong>
+            </div>
+            <div>
+              <span>Source Hash</span>
+              <strong id="sourceTxValue">-</strong>
+            </div>
+          </div>
+
+          <div class="ticket-footer">
+            <div class="scratch-progress-block">
+              <span>Scratch Progress</span>
+              <div class="meter">
+                <div id="scratchMeterFill" class="meter-fill"></div>
+              </div>
+              <strong id="scratchMeterLabel">0%</strong>
+            </div>
+            <div class="ticket-footer-actions">
+              <button id="claimButton" class="button button-accent" disabled>Claim Prize</button>
+            </div>
+          </div>
+        </article>
+
+        <article class="panel records-panel">
+          <div class="panel-headline">
+            <div>
+              <p class="eyebrow">Winner Board</p>
+              <h3>Recent Hits</h3>
+            </div>
+            <span id="winnerCountBadge" class="badge badge-gold">0 records</span>
+          </div>
+          <div id="winnerList" class="winner-list"></div>
+        </article>
+      </section>
+
+      <section class="footer-strip">
+        <article class="panel footer-card">
+          <p class="eyebrow">Contract Addresses</p>
+          <div class="address-strip">
+            <div>
+              <span>Source</span>
+              <strong id="sourceAddressValue">-</strong>
+            </div>
+            <div>
+              <span>Game</span>
+              <strong id="gameAddressValue">-</strong>
+            </div>
+            <div>
+              <span>Reactive</span>
+              <strong id="reactiveAddressValue">-</strong>
+            </div>
+          </div>
+        </article>
+      </section>
+    </main>
+
+    <div id="scratchModal" class="modal hidden" aria-hidden="true">
+      <div class="modal-backdrop" id="modalBackdrop"></div>
+      <div class="modal-card">
+        <button id="closeModalButton" class="modal-close" aria-label="Close">×</button>
+        <div class="modal-header">
+          <div>
+            <p class="eyebrow">Scratch Ticket</p>
+            <h3 id="modalTicketTitle">Ticket locked</h3>
+          </div>
+          <span id="modalStatusPill" class="pill">Idle</span>
+        </div>
+
+        <div class="ticket-stage">
+          <div class="ticket-underlay">
+            <p class="underlay-kicker" id="resultKicker">Awaiting reveal</p>
+            <h4 id="resultTitle">Buy a ticket to begin</h4>
+            <p id="resultBody">Once your ticket is ready, drag the mouse across the foil to reveal the result.</p>
+            <div class="underlay-stats">
+              <div>
+                <span>Random Word</span>
+                <strong id="resultRandomWord">-</strong>
+              </div>
+              <div>
+                <span>Prize Tier</span>
+                <strong id="modalPrizeTier">-</strong>
+              </div>
+              <div>
+                <span>Payout</span>
+                <strong id="modalPrizePayout">-</strong>
+              </div>
+            </div>
+          </div>
+          <canvas id="scratchCanvas" width="880" height="520" aria-label="Scratch ticket"></canvas>
+        </div>
+
+        <div class="modal-footer">
+          <div class="modal-tip">
+            <span>Foil Progress</span>
+            <strong id="modalScratchLabel">Scratch to 45% to unlock claim</strong>
+          </div>
+          <div class="modal-actions">
+            <button id="modalClaimButton" class="button button-accent" disabled>Claim Prize</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <script type="module" src="./app.js?v=20260323-1"></script>
+  </body>
+</html>
+
