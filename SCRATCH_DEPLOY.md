@@ -1,37 +1,43 @@
-# Reactive Scratch Deployment
+# Reactive 刮刮乐部署说明
 
-This document covers the scratch-card flow implemented by:
+本文档对应当前项目中的三份核心合约：
 
 - `src/ScratchSource.sol`
 - `src/ScratchReactive.sol`
 - `src/ScratchGame.sol`
 
-The end-to-end flow is:
+完整链路如下：
 
-1. A user buys a ticket on the source chain.
-2. `ScratchSource` emits `TicketPurchased`.
-3. `ScratchReactive` subscribes to that event and emits a Reactive callback.
-4. `ScratchGame` receives the callback on the destination chain and requests VRF randomness.
-5. The VRF coordinator calls back with randomness.
-6. The player claims the prize on the destination chain.
+1. 用户在源链购买彩票。
+2. `ScratchSource` 发出 `TicketPurchased` 事件。
+3. `ScratchReactive` 订阅该事件，并通过 Reactive Network 发起目标链回调。
+4. `ScratchGame` 在目标链接收回调，创建票据并请求 Chainlink VRF 随机数。
+5. Chainlink VRF 回调目标链合约，写入中奖结果。
+6. 用户在前端刮开奖票并领取奖金。
 
-## Contracts
+## 一、合约职责
 
 `ScratchSource`
-- Holds ticket revenue on the source chain.
-- Emits `TicketPurchased(ticketId, player, roundId, amount)`.
+
+- 部署在源链。
+- 接收购票金额。
+- 发出 `TicketPurchased(ticketId, player, roundId, amount)` 事件。
 
 `ScratchReactive`
-- Subscribes to `TicketPurchased`.
-- Forwards `ticketId`, `player`, `roundId`, `amount`, and `sourceTxHash` to the destination chain.
-- Requires a separate activation transaction after deployment to register the subscription.
+
+- 部署在 Reactive Network。
+- 监听 `ScratchSource` 的购票事件。
+- 将 `ticketId`、`player`、`roundId`、`amount`、`sourceTxHash` 转发到目标链。
+- 部署后需要额外执行一次激活订阅。
 
 `ScratchGame`
-- Opens tickets on the destination chain.
-- Requests randomness from a VRF coordinator.
-- Resolves prize tiers and pays prizes from its own prize pool.
 
-## Constructor Args
+- 部署在目标链。
+- 接收 Reactive 回调后创建票据。
+- 请求 Chainlink VRF 随机数。
+- 根据随机数结算奖级并发奖。
+
+## 二、构造函数参数
 
 `ScratchSource(uint256 ticketPrice, uint256 initialRoundId)`
 
@@ -53,37 +59,25 @@ The end-to-end flow is:
     bool vrfNativePayment
 )`
 
-## Step 1: Compute `topic_0`
+## 三、准备事件 Topic
 
-The `ScratchReactive` contract needs the event signature hash for:
+`ScratchReactive` 需要订阅下面这个事件签名：
 
 ```text
 TicketPurchased(uint256,address,uint256,uint256)
 ```
 
-Use:
+执行：
 
 ```bash
 cast keccak "TicketPurchased(uint256,address,uint256,uint256)"
 ```
 
-## Step 2: Deploy `ScratchSource`
+把结果填入 `.env` 的 `TICKET_PURCHASED_TOPIC0`。
 
-Example:
+## 四、部署 `ScratchSource`
 
-```bash
-forge create src/ScratchSource.sol:ScratchSource \
-  --rpc-url "$ORIGIN_RPC_URL" \
-  --private-key "$ORIGIN_PRIVATE_KEY" \
-  --constructor-args 10000000000000000 1
-```
-
-The example above sets:
-
-- `ticketPrice = 0.01 ether`
-- `initialRoundId = 1`
-
-Script equivalent:
+脚本方式：
 
 ```bash
 forge script script/DeployScratchSource.s.sol:DeployScratchSourceScript \
@@ -91,71 +85,48 @@ forge script script/DeployScratchSource.s.sol:DeployScratchSourceScript \
   --broadcast
 ```
 
-## Step 3: Deploy `ScratchGame`
+当前默认参数：
 
-Before this step, prepare:
+- `SCRATCH_TICKET_PRICE=10000000000000000`，也就是 `0.01 ETH`
+- `SCRATCH_INITIAL_ROUND_ID=1`
 
-- a destination-chain callback proxy address for Reactive callbacks
-- a Chainlink VRF v2.5 coordinator address on the destination chain
-- a valid Chainlink VRF v2.5 key hash
-- a Chainlink VRF v2.5 subscription id funded for the destination chain
+部署完成后，把地址写入：
 
-### Chainlink VRF v2.5 Setup
+```text
+SCRATCH_SOURCE_ADDR=0x...
+```
 
-Use the official VRF Subscription Manager:
+## 五、配置 Chainlink VRF
+
+先打开官方订阅管理页面：
 
 - `https://vrf.chain.link/`
 
-Official Chainlink docs:
+你需要准备：
 
-- create and manage subscriptions: `https://docs.chain.link/vrf/v2-5/subscription/create-manage`
-- get a random number with subscription: `https://docs.chain.link/vrf/v2-5/subscription/get-a-random-number`
-- supported networks and live coordinator params: `https://docs.chain.link/vrf/v2-5/supported-networks`
+1. 一个 `Ethereum Sepolia` 上的 VRF v2.5 subscription。
+2. 给 subscription 充值测试资金。
+3. 部署 `ScratchGame` 后，把 `ScratchGame` 地址添加为 consumer。
 
-For `Ethereum Sepolia`, Chainlink currently lists:
+当前 Sepolia 使用的参数：
 
-- `VRF_COORDINATOR_ADDR=0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B`
-- `VRF_KEY_HASH=0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae`
-- minimum confirmations: `3`
-
-Suggested setup:
-
-1. Open `vrf.chain.link` and connect the wallet that will own the subscription.
-2. Create a new VRF v2.5 subscription.
-3. Fund it with either:
-   - native Sepolia ETH if you plan to use `VRF_NATIVE_PAYMENT=true`
-   - testnet LINK if you plan to use `VRF_NATIVE_PAYMENT=false`
-4. Copy the subscription id into `.env` as `VRF_SUBSCRIPTION_ID`.
-5. Deploy `ScratchGame`.
-6. Add the deployed `SCRATCH_GAME_ADDR` as a consumer in the Subscription Manager.
-
-Example:
-
-```bash
-forge create src/ScratchGame.sol:ScratchGame \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --private-key "$DESTINATION_PRIVATE_KEY" \
-  --value 0.2ether \
-  --constructor-args \
-    "$DESTINATION_CALLBACK_PROXY_ADDR" \
-    "$VRF_COORDINATOR_ADDR" \
-    "$VRF_KEY_HASH" \
-    "$VRF_SUBSCRIPTION_ID" \
-    3 \
-    200000 \
-    true
+```text
+VRF_COORDINATOR_ADDR=0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B
+VRF_KEY_HASH=0x787d74caea10b2b357790d5b5247c2f63d1d91572a9846f780606e4d953677ae
+VRF_REQUEST_CONFIRMATIONS=3
+VRF_CALLBACK_GAS_LIMIT=200000
+VRF_NATIVE_PAYMENT=true
 ```
 
-After deployment, fund the prize pool again if needed:
+把你的订阅 ID 填入：
 
-```bash
-cast send "$SCRATCH_GAME_ADDR" \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --private-key "$DESTINATION_PRIVATE_KEY" \
-  --value 1ether
+```text
+VRF_SUBSCRIPTION_ID=<你的订阅ID>
 ```
 
-Script equivalent:
+## 六、部署 `ScratchGame`
+
+脚本方式：
 
 ```bash
 forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
@@ -163,57 +134,33 @@ forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
   --broadcast
 ```
 
-If you deployed with mock settings first and want to switch the same game contract to real Chainlink VRF later, use:
+当前脚本会读取：
 
-```bash
-forge script script/ConfigureScratchGameVrf.s.sol:ConfigureScratchGameVrfScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
+- `DESTINATION_CALLBACK_PROXY_ADDR`
+- `VRF_COORDINATOR_ADDR`
+- `VRF_KEY_HASH`
+- `VRF_SUBSCRIPTION_ID`
+- `VRF_REQUEST_CONFIRMATIONS`
+- `VRF_CALLBACK_GAS_LIMIT`
+- `VRF_NATIVE_PAYMENT`
+- `SCRATCH_GAME_INITIAL_FUNDING`
 
-### Mock Mode
+部署完成后：
 
-If you want to demo without Chainlink VRF first, deploy the local mock coordinator to the destination chain and point the game at it.
+1. 把地址写入 `.env`
+2. 去 `vrf.chain.link`
+3. 在你的 subscription 中点击 `Add consumer`
+4. 添加 `SCRATCH_GAME_ADDR`
 
-Deploy the mock:
-
-```bash
-forge script script/DeployMockVRFCoordinator.s.sol:DeployMockVRFCoordinatorScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
-
-Then set:
+也就是说：
 
 ```text
-VRF_COORDINATOR_ADDR=0x<mock coordinator address>
-VRF_KEY_HASH=0x1111111111111111111111111111111111111111111111111111111111111111
-VRF_SUBSCRIPTION_ID=1
-VRF_REQUEST_CONFIRMATIONS=3
-VRF_CALLBACK_GAS_LIMIT=200000
-VRF_NATIVE_PAYMENT=false
+SCRATCH_GAME_ADDR=0x...
 ```
 
-These values only need to be non-zero in mock mode.
+## 七、部署 `ScratchReactive`
 
-## Step 4: Deploy `ScratchReactive`
-
-Example:
-
-```bash
-forge create src/ScratchReactive.sol:ScratchReactive \
-  --rpc-url "$REACTIVE_RPC_URL" \
-  --private-key "$REACTIVE_PRIVATE_KEY" \
-  --value 0.1ether \
-  --constructor-args \
-    "$ORIGIN_CHAIN_ID" \
-    "$DESTINATION_CHAIN_ID" \
-    "$SCRATCH_SOURCE_ADDR" \
-    "$TICKET_PURCHASED_TOPIC0" \
-    "$SCRATCH_GAME_ADDR"
-```
-
-Script equivalent:
+脚本方式：
 
 ```bash
 forge script script/DeployScratchReactive.s.sol:DeployScratchReactiveScript \
@@ -221,9 +168,15 @@ forge script script/DeployScratchReactive.s.sol:DeployScratchReactiveScript \
   --broadcast
 ```
 
-## Step 5: Activate The Reactive Subscription
+部署完成后，把地址写入：
 
-After deployment, activate the source-chain event subscription:
+```text
+SCRATCH_REACTIVE_ADDR=0x...
+```
+
+## 八、激活 Reactive 订阅
+
+部署完 `ScratchReactive` 后，需要手动激活监听：
 
 ```bash
 forge script script/ActivateScratchReactiveSubscription.s.sol:ActivateScratchReactiveSubscriptionScript \
@@ -231,21 +184,26 @@ forge script script/ActivateScratchReactiveSubscription.s.sol:ActivateScratchRea
   --broadcast
 ```
 
-## Step 6: Bind `ScratchGame` To The Reactive Contract
-
-Set the expected Reactive sender on the destination chain:
+或者直接用：
 
 ```bash
-cast send "$SCRATCH_GAME_ADDR" \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --private-key "$DESTINATION_PRIVATE_KEY" \
-  "setExpectedReactiveSender(address)" \
-  "$EXPECTED_REACTIVE_SENDER_ADDR"
+cast send "$SCRATCH_REACTIVE_ADDR" \
+  "activateSubscription()" \
+  --private-key "$REACTIVE_PRIVATE_KEY" \
+  --rpc-url "$REACTIVE_RPC_URL"
 ```
 
-`EXPECTED_REACTIVE_SENDER_ADDR` should be the Reactive callback sender identity used by the network for this RVM, not the deployed `SCRATCH_REACTIVE_ADDR` contract address. For this project, that is the Reactive deployer address.
+## 九、绑定目标链回调身份
 
-Script equivalent:
+`ScratchGame` 需要绑定 Reactive 回调发送者身份。
+
+注意：
+
+- 这里不是填 `SCRATCH_REACTIVE_ADDR`
+- 而是填 Reactive Network 识别到的实际发送身份
+- 当前项目里就是 Reactive 部署钱包地址
+
+执行：
 
 ```bash
 forge script script/BindScratchGameReactive.s.sol:BindScratchGameReactiveScript \
@@ -253,10 +211,15 @@ forge script script/BindScratchGameReactive.s.sol:BindScratchGameReactiveScript 
   --broadcast
 ```
 
-## Step 6: Buy A Ticket
-## Step 7: Buy A Ticket
+对应环境变量：
 
-Example:
+```text
+EXPECTED_REACTIVE_SENDER_ADDR=0x...
+```
+
+## 十、购票测试
+
+如果你不用前端，也可以直接在源链手动购票：
 
 ```bash
 cast send "$SCRATCH_SOURCE_ADDR" \
@@ -266,63 +229,35 @@ cast send "$SCRATCH_SOURCE_ADDR" \
   "buyTicket()"
 ```
 
-After the source-chain transaction is confirmed:
+一张票正常情况下会依次经历：
 
-- `ScratchReactive` should emit a callback
-- `ScratchGame` should emit `TicketOpened`
-- the VRF coordinator should later trigger `RandomnessFulfilled`
+1. `TicketPurchased`
+2. `TicketOpened`
+3. `RandomnessRequested`
+4. `RandomnessFulfilled`
+5. 前端可刮开并领取奖金
 
-If you are using the mock coordinator, randomness will not arrive automatically. Fulfill it manually with:
+## 十一、演示必中奖开关
 
-```bash
-forge script script/FulfillMockScratchRequest.s.sol:FulfillMockScratchRequestScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
+为了黑客松演示稳定，`ScratchGame` 支持演示模式。
 
-Before running that script, set:
+开启后：
 
-```text
-MOCK_FULFILL_TICKET_ID=<ticket id to resolve>
-MOCK_RANDOM_WORD=50
-```
+- 仍然会真实请求 Chainlink VRF
+- 随机数仍然会真实写入链上
+- 但前 `N` 张票的奖级会被强制设为你指定的档位
+- 用完后自动关闭
 
-Prize examples with the current game logic:
+可用奖级：
 
-- `0` => jackpot
-- `50` => gold hit
-- `500` => silver hit
-- `5000` => no prize
+- `1`：回本
+- `2`：银奖
+- `3`：金奖
+- `4`：头奖
 
-## Demo Win Mode
+### 1. 开启必中奖
 
-For hackathon demos, `ScratchGame` now supports an owner-only one-shot demo override.
-
-It is disabled by default.
-
-When enabled:
-
-- the next `N` tickets still request real VRF randomness
-- the returned random word is still stored on-chain
-- but the prize tier is force-set to the configured winning tier
-- after the queued number of tickets is consumed, demo mode turns itself off
-
-Available forced prize tiers:
-
-- `1` => refund
-- `2` => silver hit
-- `3` => gold hit
-- `4` => jackpot
-
-Configure it with:
-
-```bash
-forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
-
-Before running that script, set:
+先设置 `.env`：
 
 ```text
 DEMO_MODE_ENABLED=true
@@ -330,12 +265,43 @@ DEMO_FORCED_PRIZE_TIER=3
 DEMO_REMAINING_TICKETS=1
 ```
 
-The example above guarantees that the next ticket resolves as a gold hit, then demo mode auto-disables.
+然后执行：
 
-## Step 7: Claim The Prize
-## Step 8: Claim The Prize
+```bash
+forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
+  --rpc-url "$DESTINATION_RPC_URL" \
+  --broadcast
+```
 
-Once the ticket is in `Ready` state, the player claims on the destination chain:
+这表示：
+
+- 下一张票必定是 `3` 档，也就是金奖
+- 只生效 `1` 次
+- 用完后自动关闭
+
+### 2. 关闭必中奖
+
+如果比赛演示结束后要恢复真实概率，设置：
+
+```text
+DEMO_MODE_ENABLED=false
+DEMO_FORCED_PRIZE_TIER=3
+DEMO_REMAINING_TICKETS=1
+```
+
+然后执行同一条脚本：
+
+```bash
+forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
+  --rpc-url "$DESTINATION_RPC_URL" \
+  --broadcast
+```
+
+关闭后，后续票据完全按真实随机数结算。
+
+## 十二、领奖
+
+当票据状态变成 `Ready` 后，用户可以在目标链领奖：
 
 ```bash
 cast send "$SCRATCH_GAME_ADDR" \
@@ -345,16 +311,32 @@ cast send "$SCRATCH_GAME_ADDR" \
   "$TICKET_ID"
 ```
 
-## Local Testing
+如果使用前端，则在刮开奖票后点击“领取奖金”即可。
 
-Run:
+## 十三、本地测试
+
+执行：
 
 ```bash
 forge test --match-contract ScratchFlowTest -vv
 ```
 
-The local tests use:
+当前测试覆盖：
 
-- `src/mocks/MockVRFCoordinatorV2.sol`
-- `src/mocks/MockCallbackProxy.sol`
-- `test/ScratchFlow.t.sol`
+- 精确票价校验
+- 完整购票到领奖流程
+- 演示必中奖模式
+
+## 十四、当前演示建议顺序
+
+比赛现场建议按下面顺序演示：
+
+1. 打开前端并连接钱包
+2. 展示底部三个合约地址
+3. 说明用户先在源链买票
+4. 等待票据在目标链 materialize
+5. 展示真实 VRF 请求
+6. 刮开奖票
+7. 展示中奖记录和奖金领取
+
+如果你要稳定演示中奖，保持演示模式开启即可。

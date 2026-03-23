@@ -1,5 +1,5 @@
 export const SCRATCH_CONFIG = {
-  appName: "Reactive Scratch",
+  appName: "Lucky Flux 刮刮乐",
   refreshIntervalMs: 5000,
   sourceChain: {
     id: 11155111,
@@ -24,10 +24,10 @@ export const SCRATCH_CONFIG = {
     scratchThreshold: 0.45,
   },
   prizeTiers: [
-    { tier: 0, label: "No Prize", accent: "Better luck next block.", multiplier: "0x" },
-    { tier: 1, label: "Refund", accent: "Ticket money comes back.", multiplier: "1x" },
-    { tier: 2, label: "Silver Hit", accent: "A clean 1.5x payout.", multiplier: "1.5x" },
-    { tier: 3, label: "Gold Hit", accent: "Five times the ticket price.", multiplier: "5x" },
-    { tier: 4, label: "Jackpot", accent: "One in ten thousand.", multiplier: "50x" },
+    { tier: 0, label: "谢谢参与", accent: "这次没中，下一张继续。", multiplier: "0x" },
+    { tier: 1, label: "回本", accent: "票钱原路返还。", multiplier: "1x" },
+    { tier: 2, label: "银奖", accent: "稳定命中 1.5 倍奖励。", multiplier: "1.5x" },
+    { tier: 3, label: "金奖", accent: "五倍奖励，适合现场演示。", multiplier: "5x" },
+    { tier: 4, label: "头奖", accent: "万里挑一的终极大奖。", multiplier: "50x" },
   ],
 };

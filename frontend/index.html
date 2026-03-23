@@ -22,21 +22,21 @@
         </div>
 
         <div class="topbar-actions">
-          <button id="connectButton" class="button button-ghost">Connect Wallet</button>
+          <button id="connectButton" class="button button-ghost">连接钱包</button>
         </div>
       </header>
 
       <section class="hero-grid">
         <article class="hero-card panel glow-panel">
           <div class="hero-copy">
-            <p class="eyebrow">Live Round</p>
-            <h2>Scratch the lacquer. Chase the jackpot.</h2>
+            <p class="eyebrow">当前奖池</p>
+            <h2>买票，上链，刮开，冲击头奖。</h2>
             <p class="hero-body">
-              Buy a ticket, wait for your card to finalize, then rip the foil with your mouse and cash out on a winning hit.
+              在源链买一张票，等待目标链生成刮刮乐，用鼠标刮开涂层，中奖后直接在链上领奖。
             </p>
             <div class="hero-actions">
-              <button id="buyButton" class="button button-primary">Buy Ticket</button>
-              <button id="openScratchButton" class="button button-secondary" disabled>Open Ticket</button>
+              <button id="buyButton" class="button button-primary">购买彩票</button>
+              <button id="openScratchButton" class="button button-secondary" disabled>打开彩票</button>
             </div>
           </div>
 
@@ -45,12 +45,12 @@
             <div class="machine-orbit orbit-b"></div>
             <div class="machine-ticket">
               <span class="ticket-flare"></span>
-              <p class="ticket-mini-kicker">Current Ticket</p>
-              <strong id="machineTicketTitle">No live ticket</strong>
-              <p id="machineTicketBody">Connect your wallet and mint a ticket to start a run.</p>
+              <p class="ticket-mini-kicker">当前票据</p>
+              <strong id="machineTicketTitle">暂无进行中的彩票</strong>
+              <p id="machineTicketBody">连接钱包后购买一张票，开始本轮演示。</p>
               <div class="machine-pills">
-                <span id="machineStatusPill" class="pill">Idle</span>
-                <span id="machinePrizePill" class="pill pill-muted">No prize yet</span>
+                <span id="machineStatusPill" class="pill">待机</span>
+                <span id="machinePrizePill" class="pill pill-muted">结果待开奖</span>
               </div>
             </div>
           </div>
@@ -58,22 +58,22 @@
 
         <aside class="control-stack">
           <article class="panel stat-panel">
-            <p class="eyebrow">Player Session</p>
+            <p class="eyebrow">玩家信息</p>
             <div class="stat-grid">
               <div>
-                <span>Wallet</span>
+                <span>钱包</span>
                 <strong id="walletValue">-</strong>
               </div>
               <div>
-                <span>Connected Network</span>
+                <span>当前网络</span>
                 <strong id="chainValue">-</strong>
               </div>
               <div>
-                <span>Ticket Price</span>
+                <span>票价</span>
                 <strong id="ticketPriceValue">-</strong>
               </div>
               <div>
-                <span>Round</span>
+                <span>轮次</span>
                 <strong id="roundValue">-</strong>
               </div>
             </div>
@@ -82,12 +82,12 @@
           <article class="panel action-panel">
             <div class="action-head">
               <div>
-                <p class="eyebrow">Run Status</p>
-                <h3 id="statusHeadline">Waiting for wallet</h3>
+                <p class="eyebrow">流程状态</p>
+                <h3 id="statusHeadline">等待连接钱包</h3>
               </div>
-              <button id="refreshButton" class="icon-button" aria-label="Refresh status">?</button>
+              <button id="refreshButton" class="icon-button" aria-label="刷新状态">?</button>
             </div>
-            <p id="statusMessage" class="action-copy">Connect a wallet to inspect your latest ticket.</p>
+            <p id="statusMessage" class="action-copy">连接钱包后即可查看你最近一张彩票的链上状态。</p>
             <div class="progress-wrap">
               <div class="progress-track">
                 <div id="flowProgressFill" class="progress-fill"></div>
@@ -103,49 +103,49 @@
         <article class="panel current-ticket-panel">
           <div class="panel-headline">
             <div>
-              <p class="eyebrow">Your Ticket</p>
-              <h3 id="ticketPanelTitle">No ticket minted</h3>
+              <p class="eyebrow">我的彩票</p>
+              <h3 id="ticketPanelTitle">当前还没有购票记录</h3>
             </div>
-            <span id="ticketBadge" class="badge">No ticket</span>
+            <span id="ticketBadge" class="badge">暂无彩票</span>
           </div>
 
           <div class="ticket-meta-grid">
             <div>
-              <span>Ticket ID</span>
+              <span>票号</span>
               <strong id="ticketIdValue">-</strong>
             </div>
             <div>
-              <span>Status</span>
+              <span>状态</span>
               <strong id="destinationStatusValue">-</strong>
             </div>
             <div>
-              <span>Request ID</span>
+              <span>请求 ID</span>
               <strong id="requestIdValue">-</strong>
             </div>
             <div>
-              <span>Prize Tier</span>
+              <span>奖级</span>
               <strong id="resultTier">-</strong>
             </div>
             <div>
-              <span>Payout</span>
+              <span>奖金</span>
               <strong id="resultPayout">-</strong>
             </div>
             <div>
-              <span>Source Hash</span>
+              <span>源链交易</span>
               <strong id="sourceTxValue">-</strong>
             </div>
           </div>
 
           <div class="ticket-footer">
             <div class="scratch-progress-block">
-              <span>Scratch Progress</span>
+              <span>刮奖进度</span>
               <div class="meter">
                 <div id="scratchMeterFill" class="meter-fill"></div>
               </div>
               <strong id="scratchMeterLabel">0%</strong>
             </div>
             <div class="ticket-footer-actions">
-              <button id="claimButton" class="button button-accent" disabled>Claim Prize</button>
+              <button id="claimButton" class="button button-accent" disabled>领取奖金</button>
             </div>
           </div>
         </article>
@@ -153,10 +153,10 @@
         <article class="panel records-panel">
           <div class="panel-headline">
             <div>
-              <p class="eyebrow">Winner Board</p>
-              <h3>Recent Hits</h3>
+              <p class="eyebrow">中奖榜单</p>
+              <h3>最近开奖记录</h3>
             </div>
-            <span id="winnerCountBadge" class="badge badge-gold">0 records</span>
+            <span id="winnerCountBadge" class="badge badge-gold">0 条记录</span>
           </div>
           <div id="winnerList" class="winner-list"></div>
         </article>
@@ -164,7 +164,7 @@
 
       <section class="footer-strip">
         <article class="panel footer-card">
-          <p class="eyebrow">Contract Addresses</p>
+          <p class="eyebrow">合约地址</p>
           <div class="address-strip">
             <div>
               <span>Source</span>
@@ -186,31 +186,31 @@
     <div id="scratchModal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-card">
-        <button id="closeModalButton" class="modal-close" aria-label="Close">×</button>
+        <button id="closeModalButton" class="modal-close" aria-label="关闭">×</button>
         <div class="modal-header">
           <div>
-            <p class="eyebrow">Scratch Ticket</p>
-            <h3 id="modalTicketTitle">Ticket locked</h3>
+            <p class="eyebrow">刮奖面板</p>
+            <h3 id="modalTicketTitle">彩票尚未生成</h3>
           </div>
-          <span id="modalStatusPill" class="pill">Idle</span>
+          <span id="modalStatusPill" class="pill">待机</span>
         </div>
 
         <div class="ticket-stage">
           <div class="ticket-underlay">
-            <p class="underlay-kicker" id="resultKicker">Awaiting reveal</p>
-            <h4 id="resultTitle">Buy a ticket to begin</h4>
-            <p id="resultBody">Once your ticket is ready, drag the mouse across the foil to reveal the result.</p>
+            <p class="underlay-kicker" id="resultKicker">等待揭晓</p>
+            <h4 id="resultTitle">先购买一张彩票</h4>
+            <p id="resultBody">当彩票进入可刮开状态后，用鼠标在涂层上拖动即可查看结果。</p>
             <div class="underlay-stats">
               <div>
-                <span>Random Word</span>
+                <span>随机数</span>
                 <strong id="resultRandomWord">-</strong>
               </div>
               <div>
-                <span>Prize Tier</span>
+                <span>奖级</span>
                 <strong id="modalPrizeTier">-</strong>
               </div>
               <div>
-                <span>Payout</span>
+                <span>奖金</span>
                 <strong id="modalPrizePayout">-</strong>
               </div>
             </div>
@@ -220,11 +220,11 @@
 
         <div class="modal-footer">
           <div class="modal-tip">
-            <span>Foil Progress</span>
-            <strong id="modalScratchLabel">Scratch to 45% to unlock claim</strong>
+            <span>刮开进度</span>
+            <strong id="modalScratchLabel">刮开 45% 后可领取奖金</strong>
           </div>
           <div class="modal-actions">
-            <button id="modalClaimButton" class="button button-accent" disabled>Claim Prize</button>
+            <button id="modalClaimButton" class="button button-accent" disabled>领取奖金</button>
           </div>
         </div>
       </div>
