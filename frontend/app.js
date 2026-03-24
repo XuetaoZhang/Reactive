@@ -1,5 +1,5 @@
 import { BrowserProvider, Contract, JsonRpcProvider, formatEther } from "https://esm.sh/ethers@6.13.5";
-import { SCRATCH_CONFIG } from "./config.js?v=20260323-1";
+import { SCRATCH_CONFIG } from "./config.js?v=20260324-4";
 
 const SOURCE_ABI = [
   "function buyTicket() payable returns (uint256)",
@@ -57,7 +57,7 @@ const state = {
   gameTicket: null,
   recentWinners: [],
   appStatus: APP_STATUS.DISCONNECTED,
-  statusDetail: "Connect a wallet to inspect your latest ticket.",
+  statusDetail: "连接钱包后即可查看你最近一张 Card 的链上状态。",
   refreshTimer: null,
   scratchRatio: 0,
   isPointerDown: false,
@@ -83,6 +83,7 @@ const elements = {
   scratchModal: document.getElementById("scratchModal"),
   statusHeadline: document.getElementById("statusHeadline"),
   statusMessage: document.getElementById("statusMessage"),
+  signalLabel: document.getElementById("signalLabel"),
   flowProgressFill: document.getElementById("flowProgressFill"),
   flowProgressLabel: document.getElementById("flowProgressLabel"),
   ticketBadge: document.getElementById("ticketBadge"),
@@ -170,7 +171,7 @@ function bindEvents() {
   window.ethereum.on("accountsChanged", async (accounts) => {
     state.account = accounts[0] ?? null;
     if (!state.account) {
-      resetSession(APP_STATUS.DISCONNECTED, "Wallet disconnected.");
+      resetSession(APP_STATUS.DISCONNECTED, "钱包已断开连接。");
       render();
       return;
     }
@@ -185,13 +186,13 @@ function bindEvents() {
 
 async function connectWallet() {
   if (!window.ethereum) {
-    setAppStatus(APP_STATUS.ERROR, "No injected wallet found. Use MetaMask or another EVM wallet.");
+    setAppStatus(APP_STATUS.ERROR, "未检测到钱包插件，请使用 MetaMask 或其他 EVM 钱包。");
     render();
     return;
   }
 
   if (!state.hasConfiguration) {
-    setAppStatus(APP_STATUS.UNCONFIGURED, "Fill frontend/config.js with deployed contract addresses first.");
+    setAppStatus(APP_STATUS.UNCONFIGURED, "请先在 frontend/config.js 中填入已部署的合约地址。");
     render();
     return;
   }
@@ -208,7 +209,7 @@ async function connectWallet() {
     await refreshSession();
   }
   catch (error) {
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Wallet connection failed."));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "钱包连接失败。"));
     render();
   }
 }
@@ -229,7 +230,7 @@ async function refreshSession() {
     state.currentRoundId = currentRoundId;
 
     if (!state.account) {
-      setAppStatus(APP_STATUS.DISCONNECTED, "Connect a wallet to inspect your latest ticket.");
+      setAppStatus(APP_STATUS.DISCONNECTED, "连接钱包后即可查看你最近一张 Card 的链上状态。");
       state.latestTicketId = null;
       state.sourceReceipt = null;
       state.gameTicket = null;
@@ -247,7 +248,7 @@ async function refreshSession() {
       scratch.revealed = false;
       state.scratchRatio = 0;
       state.recentWinners = await fetchRecentWinners();
-      setAppStatus(APP_STATUS.IDLE, "No ticket in this wallet yet. Mint one and wait for the card to materialize.");
+      setAppStatus(APP_STATUS.IDLE, "当前钱包还没有购票记录，先买一张票开始本轮游戏。");
       render();
       return;
     }
@@ -267,7 +268,7 @@ async function refreshSession() {
     render();
   }
   catch (error) {
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Failed to refresh contract state."));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "刷新合约状态失败。"));
     render();
   }
 }
@@ -304,17 +305,17 @@ async function fetchRecentWinners() {
 
 function deriveAppStatus() {
   if (!state.latestTicketId || state.latestTicketId === 0n) {
-    setAppStatus(APP_STATUS.IDLE, "No ticket in this wallet yet. Mint one and wait for the card to materialize.");
+    setAppStatus(APP_STATUS.IDLE, "当前钱包还没有购票记录，先买一张票开始本轮游戏。");
     return;
   }
 
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
-    setAppStatus(APP_STATUS.BRIDGING, "Ticket minted. Your scratch card is still materializing.");
+    setAppStatus(APP_STATUS.BRIDGING, "源链已购票，目标链 Scratch Card 正在生成。");
     return;
   }
 
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
-    setAppStatus(APP_STATUS.RANDOMIZING, "Card created. Randomness is still cooking.");
+    setAppStatus(APP_STATUS.RANDOMIZING, "Card 已生成，正在等待 Chainlink VRF 返回随机结果。");
     return;
   }
 
@@ -322,19 +323,19 @@ function deriveAppStatus() {
     setAppStatus(
       scratch.revealed ? APP_STATUS.REVEALED : APP_STATUS.READY,
       scratch.revealed
-        ? "Ticket is revealed. Claim the payout if this run landed a hit."
-        : "Your card is ready. Open it and scratch the foil.",
+        ? "结果已经揭晓，如有中奖可直接领取奖金。"
+        : "Card 已经就绪，打开后用鼠标刮开奖面。",
     );
     return;
   }
 
   if (state.gameTicket.status === TICKET_STATUS.Claimed) {
     scratch.revealed = true;
-    setAppStatus(APP_STATUS.FINISHED, "This run is settled. Buy another ticket to roll again.");
+    setAppStatus(APP_STATUS.FINISHED, "本轮已结算，可以继续购买下一张 Ticket。");
     return;
   }
 
-  setAppStatus(APP_STATUS.ERROR, "Ticket state is unknown.");
+  setAppStatus(APP_STATUS.ERROR, "当前彩票状态异常，请刷新后重试。");
 }
 
 async function buyTicket() {
@@ -343,11 +344,11 @@ async function buyTicket() {
   try {
     await ensureChain(SCRATCH_CONFIG.sourceChain);
     const writer = state.sourceContract.connect(state.signer);
-    setAppStatus(APP_STATUS.BUYING, "Sending your buy transaction.");
+    setAppStatus(APP_STATUS.BUYING, "正在发起购票交易。");
     render();
 
     const tx = await writer.buyTicket({ value: state.ticketPrice });
-    setAppStatus(APP_STATUS.BUYING, "Purchase submitted. Waiting for confirmation.");
+    setAppStatus(APP_STATUS.BUYING, "购票交易已提交，等待链上确认。");
     render();
 
     await tx.wait();
@@ -357,7 +358,7 @@ async function buyTicket() {
     await refreshSession();
   }
   catch (error) {
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Buy transaction failed."));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "购票交易失败。"));
     render();
   }
 }
@@ -368,7 +369,7 @@ async function claimPrize() {
   try {
     await ensureChain(SCRATCH_CONFIG.destinationChain);
     const writer = state.gameContract.connect(state.signer);
-    setAppStatus(APP_STATUS.CLAIMING, "Claim transaction submitted.");
+    setAppStatus(APP_STATUS.CLAIMING, "领奖交易已提交，等待链上确认。");
     render();
 
     const tx = await writer.claim(state.latestTicketId);
@@ -377,13 +378,13 @@ async function claimPrize() {
     await refreshSession();
   }
   catch (error) {
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Claim transaction failed."));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "领奖交易失败。"));
     render();
   }
 }
 
 async function ensureChain(targetChain) {
-  if (!window.ethereum) throw new Error("No wallet provider found.");
+  if (!window.ethereum) throw new Error("未检测到钱包提供方。");
   if (state.chainId === targetChain.id) return;
 
   const chainHex = `0x${targetChain.id.toString(16)}`;
@@ -482,10 +483,10 @@ function drawScratchLayer() {
 
   scratch.ctx.fillStyle = "#201404";
   scratch.ctx.textAlign = "center";
-  scratch.ctx.font = `${Math.floor(height * 0.12)}px Archivo Black`;
+  scratch.ctx.font = `${Math.floor(height * 0.12)}px "Luckiest Guy"`;
   scratch.ctx.fillText("SCRATCH", width / 2, height * 0.46);
-  scratch.ctx.font = `${Math.floor(height * 0.045)}px IBM Plex Mono`;
-  scratch.ctx.fillText("Drag the mouse to tear the foil", width / 2, height * 0.58);
+  scratch.ctx.font = `${Math.floor(height * 0.05)}px "Baloo 2"`;
+  scratch.ctx.fillText("DRAG TO REVEAL", width / 2, height * 0.58);
 }
 
 function scratchAtEvent(event) {
@@ -521,7 +522,7 @@ function updateScratchRatio() {
     scratch.revealed = true;
     if (state.latestTicketId) persistScratchReveal(String(state.latestTicketId), true);
     if (state.gameTicket?.status === TICKET_STATUS.Ready) {
-      setAppStatus(APP_STATUS.REVEALED, "Ticket is revealed. Claim the payout if this run landed a hit.");
+      setAppStatus(APP_STATUS.REVEALED, "结果已经揭晓，如有中奖可直接领取奖金。");
     }
   }
 
@@ -551,7 +552,7 @@ function syncScratchRevealState() {
   if (scratch.revealed) {
     state.scratchRatio = 1;
     if (state.appStatus === APP_STATUS.READY) {
-      setAppStatus(APP_STATUS.REVEALED, "Ticket is revealed. Claim the payout if this run landed a hit.");
+      setAppStatus(APP_STATUS.REVEALED, "结果已经揭晓，如有中奖可直接领取奖金。");
     }
   }
   else {
@@ -578,12 +579,18 @@ function canOpenScratch() {
 }
 
 function render() {
-  elements.body.className = `status-${state.appStatus}`;
+  elements.body.className = [
+    `status-${state.appStatus}`,
+    `tier-${Number(state.gameTicket?.prizeTier ?? 0)}`,
+    scratch.revealed ? "is-revealed" : "is-concealed",
+    canOpenScratch() ? "has-ticket" : "no-ticket",
+  ].join(" ");
   const flowPercent = getFlowPercent();
   const activeTier = tierMeta();
 
   elements.statusHeadline.textContent = headlineForStatus();
   elements.statusMessage.textContent = state.statusDetail;
+  elements.signalLabel.textContent = signalCopy();
   elements.flowProgressFill.style.width = `${flowPercent}%`;
   elements.flowProgressLabel.textContent = `${flowPercent}%`;
 
@@ -593,21 +600,21 @@ function render() {
   elements.roundValue.textContent = state.currentRoundId ? state.currentRoundId.toString() : "-";
 
   elements.ticketBadge.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `Ticket #${state.latestTicketId.toString()}`
-    : "No ticket";
+    ? `CARD #${state.latestTicketId.toString()}`
+    : "NO CARD";
   elements.ticketPanelTitle.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `Run ${state.latestTicketId.toString()} is ${destinationStatusLabel().toLowerCase()}`
-    : "No ticket minted";
+    ? `CARD #${state.latestTicketId.toString()} · ${destinationStatusLabel()}`
+    : "NO CARD YET";
   elements.machineTicketTitle.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `Ticket #${state.latestTicketId.toString()}`
-    : "No live ticket";
+    ? `CARD #${state.latestTicketId.toString()}`
+    : "NO ACTIVE CARD";
   elements.machineTicketBody.textContent = machineCopy();
   elements.machineStatusPill.textContent = destinationStatusLabel();
   elements.machineStatusPill.className = `pill ${pillClassForStatus()}`;
   elements.machinePrizePill.textContent = state.gameTicket && state.gameTicket.player !== ZERO_ADDRESS
     ? `${activeTier.label} | ${formatEther(state.gameTicket.prizeAmount)} ETH`
-    : "No prize yet";
-  elements.machinePrizePill.className = `pill ${state.gameTicket?.prizeAmount > 0n ? "pill-gold" : "pill-muted"}`;
+    : "PENDING";
+  elements.machinePrizePill.className = `pill tier-pill-${activeTier.tier} ${state.gameTicket?.prizeAmount > 0n ? "pill-gold" : "pill-muted"}`;
 
   elements.ticketIdValue.textContent = state.latestTicketId && state.latestTicketId !== 0n ? state.latestTicketId.toString() : "-";
   elements.destinationStatusValue.textContent = destinationStatusLabel();
@@ -632,19 +639,19 @@ function render() {
     ? `${formatEther(state.gameTicket.prizeAmount)} ETH`
     : "-";
   elements.modalTicketTitle.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `Ticket #${state.latestTicketId.toString()}`
-    : "Ticket locked";
+    ? `CARD #${state.latestTicketId.toString()}`
+    : "CARD LOCKED";
   elements.modalStatusPill.textContent = destinationStatusLabel();
   elements.modalStatusPill.className = `pill ${pillClassForStatus()}`;
   elements.modalScratchLabel.textContent = scratch.revealed
-    ? "Foil cleared. Claim is unlocked."
-    : `Scratch to ${Math.round(SCRATCH_CONFIG.ui.scratchThreshold * 100)}% to unlock claim`;
+    ? "Card opened. CLAIM is unlocked."
+    : `Scratch ${Math.round(SCRATCH_CONFIG.ui.scratchThreshold * 100)}% to unlock CLAIM`;
 
   const scratchPercent = Math.min(100, Math.round(state.scratchRatio * 100));
   elements.scratchMeterFill.style.width = `${scratchPercent}%`;
   elements.scratchMeterLabel.textContent = `${scratchPercent}%`;
 
-  elements.connectButton.textContent = state.account ? formatAddress(state.account) : "Connect Wallet";
+  elements.connectButton.textContent = state.account ? formatAddress(state.account) : "CONNECT";
   elements.buyButton.disabled = !canBuy();
   elements.openScratchButton.disabled = !canOpenScratch();
   elements.claimButton.disabled = !canClaim();
@@ -661,36 +668,36 @@ function render() {
 function renderTimeline() {
   const items = [
     {
-      title: "Ticket minted",
-      body: state.latestTicketId ? "Payment reached the game and a ticket ID exists." : "No source purchase yet.",
+      title: "Ticket Bought",
+      body: state.latestTicketId ? "源链支付成功，Ticket ID 已生成。" : "当前还没有源链购票记录。",
       complete: Boolean(state.latestTicketId && state.latestTicketId !== 0n),
       active: state.appStatus === APP_STATUS.BUYING,
     },
     {
-      title: "Card materialized",
+      title: "Card Materialized",
       body: state.gameTicket?.player && state.gameTicket.player !== ZERO_ADDRESS
-        ? "Your scratch card exists in the game contract."
-        : "Waiting for the card to appear.",
+        ? "目标链 Scratch Card 已经写入游戏合约。"
+        : "正在等待目标链生成 Scratch Card。",
       complete: Boolean(state.gameTicket?.player && state.gameTicket.player !== ZERO_ADDRESS),
       active: state.appStatus === APP_STATUS.BRIDGING,
     },
     {
-      title: "Randomness landed",
+      title: "VRF Settled",
       body: state.gameTicket?.status >= TICKET_STATUS.Ready
-        ? "The result is fixed on-chain."
-        : "The card is still waiting for randomness.",
+        ? "随机结果已经上链，本轮奖金已锁定。"
+        : "正在等待 Chainlink VRF 返回随机数。",
       complete: Boolean(state.gameTicket?.status >= TICKET_STATUS.Ready),
       active: state.appStatus === APP_STATUS.RANDOMIZING,
     },
     {
-      title: "Foil torn",
-      body: scratch.revealed ? "The scratch surface is open." : "Open the ticket and drag across the foil.",
+      title: "Scratch Opened",
+      body: scratch.revealed ? "奖面已打开，可以查看最终结果。" : "打开 Card 后用鼠标拖动刮开奖面。",
       complete: scratch.revealed,
       active: [APP_STATUS.READY, APP_STATUS.REVEALED].includes(state.appStatus),
     },
     {
-      title: "Payout claimed",
-      body: state.gameTicket?.status === TICKET_STATUS.Claimed ? "This run has been settled." : "Claim after reveal.",
+      title: "Prize Claimed",
+      body: state.gameTicket?.status === TICKET_STATUS.Claimed ? "本轮已经完成结算。" : "揭晓结果后可领取奖金。",
       complete: state.gameTicket?.status === TICKET_STATUS.Claimed,
       active: state.appStatus === APP_STATUS.CLAIMING,
     },
@@ -709,23 +716,23 @@ function renderTimeline() {
 
 function renderWinnerBoard() {
   if (!state.recentWinners.length) {
-    elements.winnerCountBadge.textContent = "0 records";
-    elements.winnerList.innerHTML = '<div class="winner-entry"><div class="winner-rank">--</div><div class="winner-meta"><span>Board Empty</span><strong>No resolved tickets yet.</strong></div><div class="winner-payout"><span>Payout</span><strong>-</strong></div></div>';
+    elements.winnerCountBadge.textContent = "0 RECORDS";
+    elements.winnerList.innerHTML = '<div class="winner-entry winner-empty"><div class="winner-rank">--</div><div class="winner-meta"><span>BOARD EMPTY</span><strong>当前还没有已开奖的 Card 记录。</strong></div><div class="winner-payout"><span>Payout</span><strong>-</strong></div></div>';
     return;
   }
 
-  elements.winnerCountBadge.textContent = `${state.recentWinners.length} records`;
+  elements.winnerCountBadge.textContent = `${state.recentWinners.length} RECORDS`;
   elements.winnerList.innerHTML = state.recentWinners.map((winner) => {
     const tier = SCRATCH_CONFIG.prizeTiers.find((entry) => entry.tier === Number(winner.prizeTier)) ?? SCRATCH_CONFIG.prizeTiers[0];
     return `
-      <article class="winner-entry">
+      <article class="winner-entry winner-tier-${tier.tier} ${winner.rank === 1 ? "winner-top" : ""}">
         <div class="winner-rank">#${winner.rank}</div>
         <div class="winner-meta">
           <span>${tier.label}</span>
-          <strong>${formatAddress(winner.player)} 闂?Ticket #${winner.ticketId.toString()}</strong>
+          <strong>${formatAddress(winner.player)} · CARD #${winner.ticketId.toString()}</strong>
         </div>
         <div class="winner-payout">
-          <span>${winner.claimed ? "Claimed" : "Unclaimed"}</span>
+          <span>${winner.claimed ? "CLAIMED" : "UNCLAIMED"}</span>
           <strong>${formatEther(winner.prizeAmount)} ETH</strong>
         </div>
       </article>
@@ -740,91 +747,118 @@ function canBuy() {
 function headlineForStatus() {
   switch (state.appStatus) {
     case APP_STATUS.UNCONFIGURED:
-      return "Configure the arcade first";
+      return "CONFIG FIRST";
     case APP_STATUS.IDLE:
-      return "Ready for a fresh run";
+      return "READY TO PLAY";
     case APP_STATUS.BUYING:
-      return "Minting your ticket";
+      return "BUYING TICKET";
     case APP_STATUS.BRIDGING:
-      return "Card is materializing";
+      return "CARD MATERIALIZING";
     case APP_STATUS.RANDOMIZING:
-      return "Randomness in flight";
+      return "VRF ROLLING";
     case APP_STATUS.READY:
-      return "The foil is ready to tear";
+      return "SCRATCH NOW";
     case APP_STATUS.REVEALED:
-      return "Result revealed";
+      return "RESULT REVEALED";
     case APP_STATUS.CLAIMING:
-      return "Settling payout";
+      return "CLAIMING PRIZE";
     case APP_STATUS.FINISHED:
-      return "Run complete";
+      return "ROUND CLEARED";
     case APP_STATUS.ERROR:
-      return "Run interrupted";
+      return "FLOW INTERRUPTED";
     default:
-      return "Waiting for wallet";
+      return "CONNECT WALLET";
+  }
+}
+
+function signalCopy() {
+  switch (state.appStatus) {
+    case APP_STATUS.UNCONFIGURED:
+      return "FRONTEND CONFIG REQUIRED";
+    case APP_STATUS.IDLE:
+      return "WAITING FOR NEXT RUN";
+    case APP_STATUS.BUYING:
+      return "SOURCE TX BROADCASTING";
+    case APP_STATUS.BRIDGING:
+      return "REACTIVE IS SYNCING THE PURCHASE EVENT";
+    case APP_STATUS.RANDOMIZING:
+      return "CHAINLINK VRF IS ROLLING THE RESULT";
+    case APP_STATUS.READY:
+      return "RESULT LOCKED ONCHAIN, OPEN CARD TO SCRATCH";
+    case APP_STATUS.REVEALED:
+      return "RESULT REVEALED, CLAIM IF YOU HIT";
+    case APP_STATUS.CLAIMING:
+      return "PRIZE CLAIM TX IN PROGRESS";
+    case APP_STATUS.FINISHED:
+      return "RUN COMPLETE, PRESS BUY TICKET AGAIN";
+    case APP_STATUS.ERROR:
+      return "FLOW ERROR, REFRESH AND TRY AGAIN";
+    default:
+      return "WAITING FOR WALLET";
   }
 }
 
 function resultKicker() {
-  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "Ticket locked";
-  if (state.gameTicket.status === TICKET_STATUS.PendingVRF) return "Randomness pending";
-  if (state.gameTicket.status === TICKET_STATUS.Claimed) return "Payout settled";
-  return scratch.revealed ? "Prize exposed" : "Foil ready";
+  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "CARD LOCKED";
+  if (state.gameTicket.status === TICKET_STATUS.PendingVRF) return "VRF PENDING";
+  if (state.gameTicket.status === TICKET_STATUS.Claimed) return "PRIZE SETTLED";
+  return scratch.revealed ? "RESULT LIVE" : "SCRATCH TO REVEAL";
 }
 
 function resultTitle() {
-  if (!state.latestTicketId || state.latestTicketId === 0n) return "Buy a ticket to start the run";
-  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "Your card is still spawning";
-  if (state.gameTicket.status === TICKET_STATUS.PendingVRF) return "The wheel is still turning";
-  if (!scratch.revealed) return "Drag across the foil to expose the result";
+  if (!state.latestTicketId || state.latestTicketId === 0n) return "BUY YOUR FIRST TICKET";
+  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "CARD IS MATERIALIZING";
+  if (state.gameTicket.status === TICKET_STATUS.PendingVRF) return "VRF IS ROLLING";
+  if (!scratch.revealed) return "SCRATCH TO EXPOSE THE RESULT";
   return tierMeta().label;
 }
 
 function resultBody() {
   if (!state.latestTicketId || state.latestTicketId === 0n) {
-    return "Mint a ticket, then come back here once the card is ready.";
+    return "先购买彩票，系统会在目标链生成对应的彩票并等待开奖。";
   }
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
-    return "The ticket exists, but the card has not appeared yet. Keep the page open and refreshes will catch it.";
+    return "购票已经成功，目标链正在创建彩票，保持页面打开即可自动刷新。";
   }
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
-    return "The card exists, but the final result is still waiting on randomness.";
+    return "彩票已经生成，但最终奖级还在等待 Chainlink VRF 返回随机数。";
   }
   if (!scratch.revealed) {
-    return "The prize is already fixed on-chain. Scratching only reveals what the contract has already locked in.";
+    return "奖级已经在链上锁定，刮开动作只是把最终结果展示给你。";
   }
   return tierMeta().accent;
 }
 
 function machineCopy() {
   if (!state.latestTicketId || state.latestTicketId === 0n) {
-    return "Connect your wallet and mint a ticket to start a run.";
+    return "Connect wallet and press BUY TICKET to start this run.";
   }
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
-    return "Ticket minted. Waiting for the card to appear.";
+    return "Source buy confirmed. Waiting for the target-chain Card.";
   }
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
-    return "Card is live, result still pending randomness.";
+    return "Card minted. Chainlink VRF is rolling the result.";
   }
   if (state.gameTicket.status === TICKET_STATUS.Ready && !scratch.revealed) {
-    return "Open the ticket and scratch it with your mouse.";
+    return "Open the Card and scratch with your mouse.";
   }
   if (state.gameTicket.status === TICKET_STATUS.Claimed) {
-    return "Payout claimed. Ready for another run.";
+    return "Prize claimed. Press BUY TICKET for another run.";
   }
-  return "Foil is torn. Claim the payout if there is one.";
+  return "Result revealed. If you hit, claim the prize now.";
 }
 
 function destinationStatusLabel() {
-  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "Pending card";
+  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "MINTING";
   switch (state.gameTicket.status) {
     case TICKET_STATUS.PendingVRF:
-      return "Rolling";
+      return "ROLLING";
     case TICKET_STATUS.Ready:
-      return scratch.revealed ? "Revealed" : "Ready";
+      return scratch.revealed ? "REVEALED" : "READY";
     case TICKET_STATUS.Claimed:
-      return "Claimed";
+      return "CLAIMED";
     default:
-      return "Unknown";
+      return "UNKNOWN";
   }
 }
 
@@ -902,7 +936,7 @@ function truncateHash(value) {
 }
 
 function resolveChainName(chainId) {
-  return CHAIN_LOOKUP.get(chainId)?.name ?? "Unknown chain";
+  return CHAIN_LOOKUP.get(chainId)?.name ?? "未知网络";
 }
 
 function persistScratchReveal(ticketId, revealed) {
