@@ -15,6 +15,10 @@ export const SCRATCH_CONFIG = {
     rpcUrl: "https://sepolia.infura.io/v3/a741720a2c33491da85d6f877f3cc1ba",
     blockExplorerUrl: "https://sepolia.etherscan.io",
   },
+  reactiveChain: {
+    name: "Reactive Network",
+    blockExplorerUrl: "",
+  },
   contracts: {
     source: "0xc6D1C9500E25ebDd55650Ca04f8C97e6616770C5",
     game: "0x092B84CAeDe9e1c52C7bACA840372f4c18baA3F1",

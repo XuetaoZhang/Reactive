@@ -4,7 +4,7 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lucky Scratch</title>
-    <link rel="stylesheet" href="./styles.css?v=20260324-4" />
+    <link rel="stylesheet" href="./styles.css?v=20260324-9" />
   </head>
   <body>
     <div class="noise"></div>
@@ -46,12 +46,32 @@
           </div>
 
           <div class="hero-machine">
-            <div class="hero-spark hero-spark-a">✦</div>
-            <div class="hero-spark hero-spark-b">✦</div>
+            <div class="hero-spark hero-spark-a" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="presentation">
+                <path d="M12 2 14.4 9.6 22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4L12 2Z" />
+              </svg>
+            </div>
+            <div class="hero-spark hero-spark-b" aria-hidden="true">
+              <svg viewBox="0 0 24 24" role="presentation">
+                <path d="M12 2 14.4 9.6 22 12l-7.6 2.4L12 22l-2.4-7.6L2 12l7.6-2.4L12 2Z" />
+              </svg>
+            </div>
             <div class="machine-orbit orbit-a"></div>
             <div class="machine-orbit orbit-b"></div>
             <div class="machine-ticket">
               <span class="ticket-flare"></span>
+              <div class="ticket-icon" aria-hidden="true">
+                <svg viewBox="0 0 96 96" role="presentation">
+                  <path d="M18 28c7 0 12-5 12-12h36c0 7 5 12 12 12v40c-7 0-12 5-12 12H30c0-7-5-12-12-12V28Z" />
+                  <path d="M33 24h30c0 5 4 9 9 10v28c-5 1-9 5-9 10H33c0-5-4-9-9-10V34c5-1 9-5 9-10Z" />
+                  <path d="M48 28v40" />
+                  <path d="M39 34v12" />
+                  <path d="M39 50v12" />
+                  <path d="M57 34h9" />
+                  <path d="M57 46h9" />
+                  <path d="M57 58h9" />
+                </svg>
+              </div>
               <p class="ticket-mini-kicker">LIVE CARD</p>
               <strong id="machineTicketTitle">NO ACTIVE CARD</strong>
               <p id="machineTicketBody">Connect wallet and press BUY TICKET to start this run.</p>
@@ -64,40 +84,47 @@
         </article>
 
         <aside class="control-stack">
-          <article class="panel stat-panel">
-            <p class="eyebrow">PLAYER INFO</p>
-            <div class="stat-grid">
-              <div>
-                <span>Wallet</span>
-                <strong id="walletValue">-</strong>
-              </div>
-              <div>
-                <span>Chain</span>
-                <strong id="chainValue">-</strong>
-              </div>
-              <div>
-                <span>Ticket Price</span>
-                <strong id="ticketPriceValue">-</strong>
-              </div>
-              <div>
-                <span>Round</span>
-                <strong id="roundValue">-</strong>
-              </div>
-            </div>
-          </article>
-
           <article class="panel action-panel">
             <div class="action-head">
               <div>
                 <p class="eyebrow">LIVE FLOW</p>
                 <h3 id="statusHeadline">CONNECT WALLET</h3>
               </div>
-              <button id="refreshButton" class="icon-button" aria-label="刷新状态">↻</button>
+              <button id="refreshButton" class="icon-button" aria-label="刷新状态">
+                <svg viewBox="0 0 24 24" role="presentation">
+                  <path d="M20 12a8 8 0 1 1-2.34-5.66" />
+                  <path d="M20 4v6h-6" />
+                </svg>
+              </button>
             </div>
             <p id="statusMessage" class="action-copy">连接钱包后即可查看你最近一张彩票的链上状态。</p>
             <div class="signal-strip">
               <span class="signal-dot"></span>
-              <strong id="signalLabel">SOURCE BUY · REACTIVE · VRF · CLAIM</strong>
+              <strong id="signalLabel">BUY · REACTIVE · VRF · CLAIM</strong>
+            </div>
+            <div class="flow-tools">
+              <div id="traceAnchor" class="trace-anchor">
+                <button
+                  id="traceToggleButton"
+                  class="trace-toggle-button"
+                  type="button"
+                  aria-expanded="false"
+                  aria-label="Open Reactive trace"
+                  title="Reactive trace"
+                >
+                  <span class="trace-toggle-icon" aria-hidden="true">
+                    <svg viewBox="0 0 24 24" role="presentation">
+                      <path d="M4 8h8" />
+                      <path d="M12 8 9.5 5.5" />
+                      <path d="M12 8 9.5 10.5" />
+                      <path d="M20 16h-8" />
+                      <path d="M12 16 14.5 13.5" />
+                      <path d="M12 16 14.5 18.5" />
+                    </svg>
+                  </span>
+                </button>
+                <div id="tracePanel" class="trace-panel hidden" aria-hidden="true"></div>
+              </div>
             </div>
             <div class="progress-wrap">
               <div class="progress-track">
@@ -197,7 +224,12 @@
     <div id="scratchModal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-card">
-        <button id="closeModalButton" class="modal-close" aria-label="关闭">×</button>
+        <button id="closeModalButton" class="modal-close" aria-label="关闭">
+          <svg viewBox="0 0 24 24" role="presentation">
+            <path d="M6 6 18 18" />
+            <path d="M18 6 6 18" />
+          </svg>
+        </button>
         <div class="modal-header">
           <div>
             <p class="eyebrow">SCRATCH CARD</p>
@@ -241,7 +273,6 @@
       </div>
     </div>
 
-    <script type="module" src="./app.js?v=20260324-4"></script>
+    <script type="module" src="./app.js?v=20260324-9"></script>
   </body>
 </html>
-
