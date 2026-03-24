@@ -1,5 +1,5 @@
 import { BrowserProvider, Contract, JsonRpcProvider, formatEther } from "https://esm.sh/ethers@6.13.5";
-import { SCRATCH_CONFIG } from "./config.js?v=20260324-9";
+import { SCRATCH_CONFIG } from "./config.js?v=20260324-11";
 
 const SOURCE_ABI = [
   "function buyTicket() payable returns (uint256)",
@@ -7,6 +7,7 @@ const SOURCE_ABI = [
   "function currentRoundId() view returns (uint256)",
   "function lastTicketIdByPlayer(address) view returns (uint256)",
   "function ticketReceipts(uint256) view returns (address player, uint256 amount, uint256 roundId, uint256 purchasedAt)",
+  "event TicketPurchased(uint256 indexed ticketId, address indexed player, uint256 indexed roundId, uint256 amount)",
 ];
 
 const GAME_ABI = [
@@ -39,6 +40,17 @@ const APP_STATUS = {
   ERROR: "error",
 };
 
+const FLOW_STATUS_ORDER = {
+  [APP_STATUS.IDLE]: 0,
+  [APP_STATUS.BUYING]: 1,
+  [APP_STATUS.BRIDGING]: 2,
+  [APP_STATUS.RANDOMIZING]: 3,
+  [APP_STATUS.READY]: 4,
+  [APP_STATUS.REVEALED]: 5,
+  [APP_STATUS.CLAIMING]: 6,
+  [APP_STATUS.FINISHED]: 7,
+};
+
 const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const WINNER_LOOKBACK_BLOCKS = 120000n;
@@ -68,6 +80,13 @@ const state = {
   traceOpen: false,
   trace: emptyTrace(),
   hasConfiguration: Boolean(SCRATCH_CONFIG.contracts.source) && Boolean(SCRATCH_CONFIG.contracts.game),
+  refreshInFlight: false,
+  refreshQueued: false,
+  flowTicketKey: null,
+  flowStatus: null,
+  pendingAction: null,
+  sourceEventWatcher: null,
+  ticketEventWatchers: [],
 };
 
 const scratch = {
@@ -197,6 +216,104 @@ function bindEvents() {
   });
 }
 
+function syncEventWatchers() {
+  syncSourcePurchaseWatcher();
+  syncDestinationTicketWatchers();
+}
+
+function syncSourcePurchaseWatcher() {
+  const accountKey = state.account?.toLowerCase() ?? null;
+
+  if (state.sourceEventWatcher?.accountKey === accountKey) return;
+  clearSourcePurchaseWatcher();
+
+  if (!accountKey || !state.sourceContract) return;
+
+  const filter = state.sourceContract.filters.TicketPurchased(null, state.account);
+  const listener = async (ticketId, player) => {
+    if (!state.account || player.toLowerCase() !== state.account.toLowerCase()) return;
+
+    const nextTicketId = BigInt(ticketId);
+    if (!state.latestTicketId || nextTicketId >= state.latestTicketId) {
+      state.latestTicketId = nextTicketId;
+      prepareTicketFlow(nextTicketId);
+      state.pendingAction = null;
+      applyTicketStatus(APP_STATUS.BRIDGING, "源链购票事件已确认，等待目标链生成 Scratch Card。", nextTicketId);
+      render();
+    }
+
+    await refreshSession();
+  };
+
+  state.sourceContract.on(filter, listener);
+  state.sourceEventWatcher = { accountKey, filter, listener };
+}
+
+function clearSourcePurchaseWatcher() {
+  if (!state.sourceEventWatcher || !state.sourceContract) return;
+  state.sourceContract.off(state.sourceEventWatcher.filter, state.sourceEventWatcher.listener);
+  state.sourceEventWatcher = null;
+}
+
+function syncDestinationTicketWatchers() {
+  const ticketKey = toTicketKey(state.latestTicketId);
+
+  if (state.ticketEventWatchers.length && state.ticketEventWatchers[0]?.ticketKey === ticketKey) {
+    return;
+  }
+
+  clearDestinationTicketWatchers();
+
+  if (!ticketKey || !state.gameContract) return;
+
+  const watch = (filter, handler) => {
+    const listener = async (...args) => {
+      await handler(...args);
+    };
+    state.gameContract.on(filter, listener);
+    state.ticketEventWatchers.push({ ticketKey, filter, listener });
+  };
+
+  watch(state.gameContract.filters.TicketOpened(state.latestTicketId), async () => {
+    state.pendingAction = null;
+    applyTicketStatus(APP_STATUS.RANDOMIZING, "目标链 Card 已生成，正在请求 Chainlink VRF。", state.latestTicketId);
+    render();
+    await refreshSession();
+  });
+
+  watch(state.gameContract.filters.RandomnessRequested(null, state.latestTicketId), async () => {
+    applyTicketStatus(APP_STATUS.RANDOMIZING, "随机请求已发出，等待 Chainlink VRF 回传结果。", state.latestTicketId);
+    render();
+    await refreshSession();
+  });
+
+  watch(state.gameContract.filters.RandomnessFulfilled(null, state.latestTicketId), async () => {
+    applyTicketStatus(APP_STATUS.READY, "随机结果已返回，打开 Card 开始刮奖。", state.latestTicketId);
+    render();
+    await refreshSession();
+  });
+
+  watch(state.gameContract.filters.PrizeClaimed(state.latestTicketId), async () => {
+    state.pendingAction = null;
+    scratch.revealed = true;
+    state.scratchRatio = 1;
+    if (state.latestTicketId) persistScratchReveal(String(state.latestTicketId), true);
+    applyTicketStatus(APP_STATUS.FINISHED, "奖金已领取，本轮已经完成结算。", state.latestTicketId);
+    render();
+    await refreshSession();
+  });
+}
+
+function clearDestinationTicketWatchers() {
+  if (!state.gameContract || !state.ticketEventWatchers.length) return;
+
+  for (const watcher of state.ticketEventWatchers) {
+    state.gameContract.off(watcher.filter, watcher.listener);
+  }
+
+  state.ticketEventWatchers = [];
+}
+
 async function connectWallet() {
   if (!window.ethereum) {
     setAppStatus(APP_STATUS.ERROR, "未检测到钱包插件，请使用 MetaMask 或其他 EVM 钱包。");
@@ -228,6 +345,22 @@ async function connectWallet() {
 }
 
 async function refreshSession() {
+  state.refreshQueued = true;
+  if (state.refreshInFlight) return;
+
+  state.refreshInFlight = true;
+  try {
+    while (state.refreshQueued) {
+      state.refreshQueued = false;
+      await runRefreshSession();
+    }
+  }
+  finally {
+    state.refreshInFlight = false;
+  }
+}
+
+async function runRefreshSession() {
   if (!state.sourceContract || !state.gameContract) {
     render();
     return;
@@ -243,25 +376,34 @@ async function refreshSession() {
     state.currentRoundId = currentRoundId;
 
     if (!state.account) {
+      clearTicketFlow();
       setAppStatus(APP_STATUS.DISCONNECTED, "连接钱包后即可查看你最近一张 Card 的链上状态。");
       state.latestTicketId = null;
       state.sourceReceipt = null;
       state.gameTicket = null;
       state.trace = emptyTrace();
+      syncEventWatchers();
       state.recentWinners = await fetchRecentWinners();
       render();
       return;
     }
 
+    const previousTicketKey = toTicketKey(state.latestTicketId);
     const latestTicketId = await state.sourceContract.lastTicketIdByPlayer(state.account);
     state.latestTicketId = latestTicketId;
+    const nextTicketKey = toTicketKey(latestTicketId);
+
+    if (previousTicketKey !== nextTicketKey) {
+      prepareTicketFlow(latestTicketId);
+    }
+
+    syncEventWatchers();
 
     if (latestTicketId === 0n) {
       state.sourceReceipt = null;
       state.gameTicket = null;
       state.trace = emptyTrace();
-      scratch.revealed = false;
-      state.scratchRatio = 0;
+      clearTicketFlow();
       state.recentWinners = await fetchRecentWinners();
       setAppStatus(APP_STATUS.IDLE, "当前钱包还没有购票记录，先买一张票开始本轮游戏。");
       render();
@@ -280,8 +422,9 @@ async function refreshSession() {
     state.recentWinners = recentWinners;
     state.trace = trace;
 
-    deriveAppStatus();
     syncScratchRevealState();
+    const derivedStatus = deriveAppStatus();
+    applyTicketStatus(derivedStatus.status, derivedStatus.detail, latestTicketId);
     render();
   }
   catch (error) {
@@ -323,37 +466,114 @@ async function fetchRecentWinners() {
 
 function deriveAppStatus() {
   if (!state.latestTicketId || state.latestTicketId === 0n) {
-    setAppStatus(APP_STATUS.IDLE, "当前钱包还没有购票记录，先买一张票开始本轮游戏。");
-    return;
+    return {
+      status: APP_STATUS.IDLE,
+      detail: "当前钱包还没有购票记录，先买一张票开始本轮游戏。",
+    };
   }
 
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
-    setAppStatus(APP_STATUS.BRIDGING, "源链已购票，目标链 Scratch Card 正在生成。");
-    return;
+    return {
+      status: APP_STATUS.BRIDGING,
+      detail: "源链已购票，目标链 Scratch Card 正在生成。",
+    };
   }
 
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
-    setAppStatus(APP_STATUS.RANDOMIZING, "Card 已生成，正在等待 Chainlink VRF 返回随机结果。");
-    return;
+    return {
+      status: APP_STATUS.RANDOMIZING,
+      detail: "Card 已生成，正在等待 Chainlink VRF 返回随机结果。",
+    };
   }
 
   if (state.gameTicket.status === TICKET_STATUS.Ready) {
-    setAppStatus(
-      scratch.revealed ? APP_STATUS.REVEALED : APP_STATUS.READY,
-      scratch.revealed
+    return {
+      status: scratch.revealed ? APP_STATUS.REVEALED : APP_STATUS.READY,
+      detail: scratch.revealed
         ? "结果已经揭晓，如有中奖可直接领取奖金。"
         : "Card 已经就绪，打开后用鼠标刮开奖面。",
-    );
-    return;
+    };
   }
 
   if (state.gameTicket.status === TICKET_STATUS.Claimed) {
     scratch.revealed = true;
-    setAppStatus(APP_STATUS.FINISHED, "本轮已经结算，可以继续购买下一张 Ticket。");
-    return;
+    return {
+      status: APP_STATUS.FINISHED,
+      detail: "本轮已经结算，可以继续购买下一张 Ticket。",
+    };
   }
 
-  setAppStatus(APP_STATUS.ERROR, "当前彩票状态异常，请刷新后重试。");
+  return {
+    status: APP_STATUS.ERROR,
+    detail: "当前彩票状态异常，请刷新后重试。",
+  };
+}
+
+function applyTicketStatus(status, detail, ticketId = state.latestTicketId) {
+  const ticketKey = toTicketKey(ticketId);
+
+  if (!(status in FLOW_STATUS_ORDER)) {
+    if (!ticketKey) clearTicketFlow();
+    setAppStatus(status, detail);
+    return true;
+  }
+
+  if (!ticketKey) {
+    setAppStatus(status, detail);
+    return true;
+  }
+
+  if (state.flowTicketKey !== ticketKey) {
+    state.flowTicketKey = ticketKey;
+    state.flowStatus = status;
+    setAppStatus(status, detail);
+    return true;
+  }
+
+  const currentRank = FLOW_STATUS_ORDER[state.flowStatus] ?? -1;
+  const floorRank = pendingStatusFloor(ticketKey);
+  const nextRank = FLOW_STATUS_ORDER[status];
+
+  if (nextRank < Math.max(currentRank, floorRank)) {
+    return false;
+  }
+
+  state.flowStatus = status;
+  setAppStatus(status, detail);
+  return true;
+}
+
+function pendingStatusFloor(ticketKey) {
+  if (!state.pendingAction) return -1;
+  if (state.pendingAction.type === APP_STATUS.BUYING) {
+    return FLOW_STATUS_ORDER[APP_STATUS.BUYING];
+  }
+  if (state.pendingAction.type === APP_STATUS.CLAIMING && state.pendingAction.ticketKey === ticketKey) {
+    return FLOW_STATUS_ORDER[APP_STATUS.CLAIMING];
+  }
+  return -1;
+}
+
+function prepareTicketFlow(ticketId) {
+  state.flowTicketKey = toTicketKey(ticketId);
+  state.flowStatus = null;
+  state.pendingAction = state.pendingAction?.type === APP_STATUS.CLAIMING ? state.pendingAction : null;
+  state.sourceReceipt = null;
+  state.gameTicket = null;
+  state.trace = emptyTrace();
+  scratch.revealed = false;
+  state.scratchRatio = 0;
+}
+
+function clearTicketFlow() {
+  state.flowTicketKey = null;
+  state.flowStatus = null;
+  state.pendingAction = null;
+}
+
+function toTicketKey(ticketId) {
+  if (!ticketId || ticketId === 0n) return null;
+  return ticketId.toString();
 }
 
 async function buyTicket() {
@@ -362,20 +582,23 @@ async function buyTicket() {
   try {
     await ensureChain(SCRATCH_CONFIG.sourceChain);
     const writer = state.sourceContract.connect(state.signer);
-    setAppStatus(APP_STATUS.BUYING, "正在发起购票交易。");
+    state.pendingAction = { type: APP_STATUS.BUYING };
+    applyTicketStatus(APP_STATUS.BUYING, "正在发起购票交易。");
     render();
 
     const tx = await writer.buyTicket({ value: state.ticketPrice });
-    setAppStatus(APP_STATUS.BUYING, "购票交易已提交，等待链上确认。");
+    applyTicketStatus(APP_STATUS.BUYING, "购票交易已提交，等待链上确认。");
     render();
 
     await tx.wait();
+    state.pendingAction = null;
     scratch.revealed = false;
     state.scratchRatio = 0;
     closeScratchModal();
     await refreshSession();
   }
   catch (error) {
+    state.pendingAction = null;
     setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "购票交易失败。"));
     render();
   }
@@ -387,15 +610,21 @@ async function claimPrize() {
   try {
     await ensureChain(SCRATCH_CONFIG.destinationChain);
     const writer = state.gameContract.connect(state.signer);
-    setAppStatus(APP_STATUS.CLAIMING, "领奖交易已提交，等待链上确认。");
+    state.pendingAction = {
+      type: APP_STATUS.CLAIMING,
+      ticketKey: toTicketKey(state.latestTicketId),
+    };
+    applyTicketStatus(APP_STATUS.CLAIMING, "领奖交易已提交，等待链上确认。", state.latestTicketId);
     render();
 
     const tx = await writer.claim(state.latestTicketId);
     await tx.wait();
+    state.pendingAction = null;
     persistScratchReveal(String(state.latestTicketId), true);
     await refreshSession();
   }
   catch (error) {
+    state.pendingAction = null;
     setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "领奖交易失败。"));
     render();
   }
@@ -540,7 +769,7 @@ function updateScratchRatio() {
     scratch.revealed = true;
     if (state.latestTicketId) persistScratchReveal(String(state.latestTicketId), true);
     if (state.gameTicket?.status === TICKET_STATUS.Ready) {
-      setAppStatus(APP_STATUS.REVEALED, "结果已经揭晓，如有中奖可直接领取奖金。");
+      applyTicketStatus(APP_STATUS.REVEALED, "结果已经揭晓，如有中奖可直接领取奖金。", state.latestTicketId);
     }
   }
 
@@ -581,9 +810,6 @@ function syncScratchRevealState() {
 
   if (scratch.revealed) {
     state.scratchRatio = 1;
-    if (state.appStatus === APP_STATUS.READY) {
-      setAppStatus(APP_STATUS.REVEALED, "结果已经揭晓，如有中奖可直接领取奖金。");
-    }
   }
   else {
     state.scratchRatio = 0;
@@ -1157,6 +1383,9 @@ function resetSession(status, detail) {
   state.recentWinners = [];
   state.scratchRatio = 0;
   scratch.revealed = false;
+  clearTicketFlow();
+  clearSourcePurchaseWatcher();
+  clearDestinationTicketWatchers();
   closeScratchModal();
   setAppStatus(status, detail);
   stopPolling();

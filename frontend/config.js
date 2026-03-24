@@ -17,7 +17,7 @@ export const SCRATCH_CONFIG = {
   },
   reactiveChain: {
     name: "Reactive Network",
-    blockExplorerUrl: "",
+    blockExplorerUrl: "https://reactscan.net",
   },
   contracts: {
     source: "0xc6D1C9500E25ebDd55650Ca04f8C97e6616770C5",
