@@ -1,16 +1,19 @@
-# 本地 Reactive Demo 部署说明
+# Lucky Scratch 部署速查
 
-这个仓库已经不是 Foundry 默认模板了。你真正要部署的合约是：
+这个文件是当前项目的中文部署速查版。完整提交说明请看：
 
-- `src/Contract.sol:Contract`
-- `src/Callback.sol:Callback`
-- `src/Reactive.sol:BasicDemoReactiveContract`
+- [README_CN.md](./README_CN.md)
+- [SCRATCH_DEPLOY.md](./SCRATCH_DEPLOY.md)
 
-不要使用模板残留的 `script/Counter.s.sol`。
+## 当前项目对应的合约
 
-## 1. 安装 Foundry
+- `src/ScratchSource.sol`
+- `src/ScratchReactive.sol`
+- `src/ScratchGame.sol`
 
-在 Windows 上，建议用 Git Bash 或 WSL，不要直接用 PowerShell 安装：
+## 快速部署顺序
+
+### 1. 安装 Foundry
 
 ```bash
 curl -L https://foundry.paradigm.xyz | bash
@@ -19,36 +22,26 @@ forge --version
 cast --version
 ```
 
-## 2. 准备环境变量
+### 2. 准备 `.env`
 
-把 `.env.example` 复制成 `.env`，然后填入你自己的值。
+把 `.env.example` 复制成 `.env` 后，至少填这些值：
 
-必填项：
-
-- `ORIGIN_RPC_URL`：源链 RPC 地址
-- `DESTINATION_RPC_URL`：目标链 RPC 地址
-- `REACTIVE_RPC_URL`：Reactive Lasna 测试网 RPC 地址
+- `ORIGIN_RPC_URL`
+- `DESTINATION_RPC_URL`
+- `REACTIVE_RPC_URL`
 - `ORIGIN_PRIVATE_KEY`
 - `DESTINATION_PRIVATE_KEY`
 - `REACTIVE_PRIVATE_KEY`
 - `ORIGIN_CHAIN_ID`
 - `DESTINATION_CHAIN_ID`
 - `DESTINATION_CALLBACK_PROXY_ADDR`
+- `VRF_COORDINATOR_ADDR`
+- `VRF_KEY_HASH`
+- `VRF_SUBSCRIPTION_ID`
 
-如果你用 `Sepolia -> Sepolia`：
+### 3. 加载环境变量
 
-- `ORIGIN_CHAIN_ID=11155111`
-- `DESTINATION_CHAIN_ID=11155111`
-- `DESTINATION_CALLBACK_PROXY_ADDR=0xc9f36411C9897e7F959D99ffca2a0Ba7ee0D7bDA`
-
-如果你用 `Sepolia -> Base Sepolia`：
-
-- `DESTINATION_CHAIN_ID=84532`
-- `DESTINATION_CALLBACK_PROXY_ADDR=0xa6eA49Ed671B8a4dfCDd34E36b7a75Ac79B8A5a6`
-
-## 3. 加载环境变量
-
-Git Bash:
+Git Bash：
 
 ```bash
 set -a
@@ -56,7 +49,7 @@ source .env
 set +a
 ```
 
-PowerShell:
+PowerShell：
 
 ```powershell
 Get-Content .env | ForEach-Object {
@@ -66,122 +59,164 @@ Get-Content .env | ForEach-Object {
 }
 ```
 
-## 4. 计算 `topic_0`
+### 4. 计算事件 Topic
 
-你当前本地源合约发出的事件是：
-
-```solidity
-event Received(address indexed origin, address indexed sender, uint256 indexed value);
-```
-
-Reactive 合约订阅源链日志时，靠的是“事件签名哈希”。也就是把下面这个签名：
+当前 `ScratchReactive` 订阅的是：
 
 ```text
-Received(address,address,uint256)
+TicketPurchased(uint256,address,uint256,uint256)
 ```
 
-做一次 `keccak256`，得到的结果就是 `topic_0`。
-
-用 `cast` 计算：
+执行：
 
 ```bash
-cast keccak "Received(address,address,uint256)"
+cast keccak "TicketPurchased(uint256,address,uint256,uint256)"
 ```
 
-然后把输出的 `0x...` 填进 `.env` 的 `TOPIC0=`。
+把结果填入：
 
-这个命令不会生成文件，也不会修改项目内容，它只是在终端里打印一个哈希值。
-
-你也可以直接把结果写进当前 shell 会话里。
-
-Git Bash:
-
-```bash
-export TOPIC0=$(cast keccak "Received(address,address,uint256)")
+```text
+TICKET_PURCHASED_TOPIC0=0x...
 ```
 
-PowerShell:
-
-```powershell
-$env:TOPIC0 = cast keccak "Received(address,address,uint256)"
-```
-
-## 5. 编译
+### 5. 编译
 
 ```bash
 forge build
 ```
 
-## 6. 部署源链合约
+### 6. 部署源链合约
 
 ```bash
-forge create src/Contract.sol:Contract \
+forge script script/DeployScratchSource.s.sol:DeployScratchSourceScript \
   --rpc-url "$ORIGIN_RPC_URL" \
-  --private-key "$ORIGIN_PRIVATE_KEY"
+  --broadcast
 ```
 
-把部署出来的地址填到 `.env` 的 `ORIGIN_CONTRACT_ADDR=`。
+部署完成后把地址写入：
 
-## 7. 部署目标链回调合约
+```text
+SCRATCH_SOURCE_ADDR=0x...
+```
+
+### 7. 部署目标链游戏合约
 
 ```bash
-forge create src/Callback.sol:Callback \
+forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
   --rpc-url "$DESTINATION_RPC_URL" \
-  --private-key "$DESTINATION_PRIVATE_KEY" \
-  --value 0.01ether \
-  --constructor-args "$DESTINATION_CALLBACK_PROXY_ADDR"
+  --broadcast
 ```
 
-把部署出来的地址填到 `.env` 的 `CALLBACK_ADDR=`。
+部署完成后把地址写入：
 
-## 8. 部署 Reactive 合约
-
-这份本地仓库的 `Reactive.sol` 构造函数和线上最新 README 不完全一样。你本地这里是：
-
-```solidity
-constructor(
-    uint256 _originChainId,
-    uint256 _destinationChainId,
-    address _contract,
-    uint256 _topic_0,
-    address _callback
-) payable
+```text
+SCRATCH_GAME_ADDR=0x...
 ```
 
-部署命令：
+### 8. 配置 VRF
 
 ```bash
-forge create src/Reactive.sol:BasicDemoReactiveContract \
+forge script script/ConfigureScratchGameVrf.s.sol:ConfigureScratchGameVrfScript \
+  --rpc-url "$DESTINATION_RPC_URL" \
+  --broadcast
+```
+
+然后去 `https://vrf.chain.link/` 把 `SCRATCH_GAME_ADDR` 添加为 consumer。
+
+### 9. 部署 Reactive 合约
+
+```bash
+forge script script/DeployScratchReactive.s.sol:DeployScratchReactiveScript \
   --rpc-url "$REACTIVE_RPC_URL" \
-  --private-key "$REACTIVE_PRIVATE_KEY" \
-  --value 0.1ether \
-  --constructor-args \
-    "$ORIGIN_CHAIN_ID" \
-    "$DESTINATION_CHAIN_ID" \
-    "$ORIGIN_CONTRACT_ADDR" \
-    "$TOPIC0" \
-    "$CALLBACK_ADDR"
+  --broadcast
 ```
 
-## 9. 触发 Demo
+部署完成后把地址写入：
 
-这份本地 `Reactive.sol` 的逻辑要求：只有当源链日志里的金额大于等于 `0.001 ether` 时，才会发起 callback。
+```text
+SCRATCH_REACTIVE_ADDR=0x...
+```
 
-向源链合约转账：
+### 10. 激活 Reactive 订阅
 
 ```bash
-cast send "$ORIGIN_CONTRACT_ADDR" \
-  --rpc-url "$ORIGIN_RPC_URL" \
-  --private-key "$ORIGIN_PRIVATE_KEY" \
-  --value 0.01ether
+forge script script/ActivateScratchReactiveSubscription.s.sol:ActivateScratchReactiveSubscriptionScript \
+  --rpc-url "$REACTIVE_RPC_URL" \
+  --broadcast
 ```
 
-然后去目标链查看 `CallbackReceived` 事件。
+### 11. 绑定 Reactive sender
 
-## 补充说明
+```bash
+forge script script/BindScratchGameReactive.s.sol:BindScratchGameReactiveScript \
+  --rpc-url "$DESTINATION_RPC_URL" \
+  --broadcast
+```
 
-- `script/Counter.s.sol` 和 `test/Counter.t.sol` 还是旧模板残留，和当前部署流程无关。
-- `topic_0` 只要事件签名变了，就一定会变。哪怕只是把事件名从 `ContractReceive` 改成 `Received`，哈希也会变。
-- 你现在既然已经改回 `Received(address,address,uint256)`，如果它和线上 README 里的事件签名完全一致，那你可以直接用官方 README 里的 `topic_0`，不一定非要自己跑 `cast keccak`。
-- 但 `_topic_0` 这个参数本身仍然要传给 `BasicDemoReactiveContract`，只是“这个值可以直接抄官方文档”，而不是“这个参数不需要了”。
-- 最稳妥的做法仍然是自己跑一次 `cast keccak "Received(address,address,uint256)"`，因为它只是在本地算哈希，不依赖链上状态，也不会产生额外副作用。
+## 前端运行与部署
+
+### 本地运行
+
+```bash
+python -m http.server 4173 -d frontend
+```
+
+然后打开：
+
+```text
+http://localhost:4173
+```
+
+### 部署到 Vercel
+
+1. 导入当前仓库
+2. Root Directory 设为 `frontend`
+3. 作为静态站点部署
+4. `frontend/config.js` 中的地址和 RPC 会暴露给前端用户，因此只放公开信息，不要放私钥
+
+## 演示模式 / 必中奖
+
+### 开启
+
+`.env`：
+
+```text
+DEMO_MODE_ENABLED=true
+DEMO_FORCED_PRIZE_TIER=3
+DEMO_REMAINING_TICKETS=1
+```
+
+执行：
+
+```bash
+forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
+  --rpc-url "$DESTINATION_RPC_URL" \
+  --broadcast
+```
+
+### 关闭
+
+`.env`：
+
+```text
+DEMO_MODE_ENABLED=false
+```
+
+执行同一个脚本：
+
+```bash
+forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
+  --rpc-url "$DESTINATION_RPC_URL" \
+  --broadcast
+```
+
+## 当前演示地址
+
+- `SCRATCH_SOURCE_ADDR=0xc6D1C9500E25ebDd55650Ca04f8C97e6616770C5`
+- `SCRATCH_GAME_ADDR=0x092B84CAeDe9e1c52C7bACA840372f4c18baA3F1`
+- `SCRATCH_REACTIVE_ADDR=0x4387e5F6C79ae885C9E2AcCB47cD4E31085BaeaF`
+
+## 当前浏览器地址
+
+- Sepolia Etherscan：`https://sepolia.etherscan.io`
+- Reactive Explorer：`https://reactscan.net/`

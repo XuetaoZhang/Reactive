@@ -1,4 +1,4 @@
-# Lucky Flux Frontend
+# Lucky Scratch Frontend
 
 This folder contains the static single-page game lobby for the scratch-card app.
 
