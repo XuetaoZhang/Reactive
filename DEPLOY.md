@@ -1,19 +1,18 @@
-# Lucky Scratch 部署速查
+# Local Reactive Demo Deployment Guide
 
-这个文件是当前项目的中文部署速查版。完整提交说明请看：
+This document explains how to deploy the local Reactive Demo.
 
-- [README_CN.md](./README_CN.md)
-- [SCRATCH_DEPLOY.md](./SCRATCH_DEPLOY.md)
+This repository is no longer the default Foundry template. The contracts you actually need to deploy are:
 
-## 当前项目对应的合约
+- `src/Contract.sol:Contract`
+- `src/Callback.sol:Callback`
+- `src/Reactive.sol:BasicDemoReactiveContract`
 
-- `src/ScratchSource.sol`
-- `src/ScratchReactive.sol`
-- `src/ScratchGame.sol`
+Do not use the leftover template script `script/Counter.s.sol`.
 
-## 快速部署顺序
+## 1. Install Foundry
 
-### 1. 安装 Foundry
+On Windows, it is recommended to install via Git Bash or WSL instead of directly using PowerShell.
 
 ```bash
 curl -L https://foundry.paradigm.xyz | bash
@@ -22,26 +21,36 @@ forge --version
 cast --version
 ```
 
-### 2. 准备 `.env`
+## 2. Prepare environment variables
 
-把 `.env.example` 复制成 `.env` 后，至少填这些值：
+Copy `.env.example` to `.env`, then fill in your own values.
 
-- `ORIGIN_RPC_URL`
-- `DESTINATION_RPC_URL`
-- `REACTIVE_RPC_URL`
+Required fields:
+
+- `ORIGIN_RPC_URL`: Source chain RPC endpoint
+- `DESTINATION_RPC_URL`: Destination chain RPC endpoint
+- `REACTIVE_RPC_URL`: Reactive Lasna testnet RPC endpoint
 - `ORIGIN_PRIVATE_KEY`
 - `DESTINATION_PRIVATE_KEY`
 - `REACTIVE_PRIVATE_KEY`
 - `ORIGIN_CHAIN_ID`
 - `DESTINATION_CHAIN_ID`
 - `DESTINATION_CALLBACK_PROXY_ADDR`
-- `VRF_COORDINATOR_ADDR`
-- `VRF_KEY_HASH`
-- `VRF_SUBSCRIPTION_ID`
 
-### 3. 加载环境变量
+If you use `Sepolia -> Sepolia`:
 
-Git Bash：
+- `ORIGIN_CHAIN_ID=11155111`
+- `DESTINATION_CHAIN_ID=11155111`
+- `DESTINATION_CALLBACK_PROXY_ADDR=0xc9f36411C9897e7F959D99ffca2a0Ba7ee0D7bDA`
+
+If you use `Sepolia -> Base Sepolia`:
+
+- `DESTINATION_CHAIN_ID=84532`
+- `DESTINATION_CALLBACK_PROXY_ADDR=0xa6eA49Ed671B8a4dfCDd34E36b7a75Ac79B8A5a6`
+
+## 3. Load environment variables
+
+Git Bash:
 
 ```bash
 set -a
@@ -49,7 +58,7 @@ source .env
 set +a
 ```
 
-PowerShell：
+PowerShell:
 
 ```powershell
 Get-Content .env | ForEach-Object {
@@ -59,164 +68,122 @@ Get-Content .env | ForEach-Object {
 }
 ```
 
-### 4. 计算事件 Topic
+## 4. Compute `topic_0`
 
-当前 `ScratchReactive` 订阅的是：
+The event emitted by your local source contract is:
 
-```text
-TicketPurchased(uint256,address,uint256,uint256)
+```solidity
+event Received(address indexed origin, address indexed sender, uint256 indexed value);
 ```
 
-执行：
+When the Reactive contract subscribes to source-chain logs, it relies on the event signature hash. In other words, it uses the following signature:
+
+```text
+Received(address,address,uint256)
+```
+
+Run `keccak256` on it, and the result is `topic_0`.
+
+Compute it with `cast`:
 
 ```bash
-cast keccak "TicketPurchased(uint256,address,uint256,uint256)"
+cast keccak "Received(address,address,uint256)"
 ```
 
-把结果填入：
+Then put the resulting `0x...` value into `TOPIC0=` in `.env`.
 
-```text
-TICKET_PURCHASED_TOPIC0=0x...
+This command does not create files or modify the project. It only prints a hash value in the terminal.
+
+You can also write the result directly into the current shell session.
+
+Git Bash:
+
+```bash
+export TOPIC0=$(cast keccak "Received(address,address,uint256)")
 ```
 
-### 5. 编译
+PowerShell:
+
+```powershell
+$env:TOPIC0 = cast keccak "Received(address,address,uint256)"
+```
+
+## 5. Build
 
 ```bash
 forge build
 ```
 
-### 6. 部署源链合约
+## 6. Deploy the source-chain contract
 
 ```bash
-forge script script/DeployScratchSource.s.sol:DeployScratchSourceScript \
+forge create src/Contract.sol:Contract \
   --rpc-url "$ORIGIN_RPC_URL" \
-  --broadcast
+  --private-key "$ORIGIN_PRIVATE_KEY"
 ```
 
-部署完成后把地址写入：
+Put the deployed address into `ORIGIN_CONTRACT_ADDR=` in `.env`.
 
-```text
-SCRATCH_SOURCE_ADDR=0x...
-```
-
-### 7. 部署目标链游戏合约
+## 7. Deploy the destination-chain callback contract
 
 ```bash
-forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
+forge create src/Callback.sol:Callback \
   --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
+  --private-key "$DESTINATION_PRIVATE_KEY" \
+  --value 0.01ether \
+  --constructor-args "$DESTINATION_CALLBACK_PROXY_ADDR"
 ```
 
-部署完成后把地址写入：
+Put the deployed address into `CALLBACK_ADDR=` in `.env`.
 
-```text
-SCRATCH_GAME_ADDR=0x...
+## 8. Deploy the Reactive contract
+
+The `Reactive.sol` constructor in this local repository is not exactly the same as the latest online README. In your local copy, it is:
+
+```solidity
+constructor(
+    uint256 _originChainId,
+    uint256 _destinationChainId,
+    address _contract,
+    uint256 _topic_0,
+    address _callback
+) payable
 ```
 
-### 8. 配置 VRF
+Deployment command:
 
 ```bash
-forge script script/ConfigureScratchGameVrf.s.sol:ConfigureScratchGameVrfScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
-
-然后去 `https://vrf.chain.link/` 把 `SCRATCH_GAME_ADDR` 添加为 consumer。
-
-### 9. 部署 Reactive 合约
-
-```bash
-forge script script/DeployScratchReactive.s.sol:DeployScratchReactiveScript \
+forge create src/Reactive.sol:BasicDemoReactiveContract \
   --rpc-url "$REACTIVE_RPC_URL" \
-  --broadcast
+  --private-key "$REACTIVE_PRIVATE_KEY" \
+  --value 0.1ether \
+  --constructor-args \
+    "$ORIGIN_CHAIN_ID" \
+    "$DESTINATION_CHAIN_ID" \
+    "$ORIGIN_CONTRACT_ADDR" \
+    "$TOPIC0" \
+    "$CALLBACK_ADDR"
 ```
 
-部署完成后把地址写入：
+## 9. Trigger the demo
 
-```text
-SCRATCH_REACTIVE_ADDR=0x...
-```
+The logic in this local `Reactive.sol` requires the amount in the source-chain log to be at least `0.001 ether` before it triggers the callback.
 
-### 10. 激活 Reactive 订阅
+Send funds to the source-chain contract:
 
 ```bash
-forge script script/ActivateScratchReactiveSubscription.s.sol:ActivateScratchReactiveSubscriptionScript \
-  --rpc-url "$REACTIVE_RPC_URL" \
-  --broadcast
+cast send "$ORIGIN_CONTRACT_ADDR" \
+  --rpc-url "$ORIGIN_RPC_URL" \
+  --private-key "$ORIGIN_PRIVATE_KEY" \
+  --value 0.01ether
 ```
 
-### 11. 绑定 Reactive sender
+Then check the `CallbackReceived` event on the destination chain.
 
-```bash
-forge script script/BindScratchGameReactive.s.sol:BindScratchGameReactiveScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
+## Additional notes
 
-## 前端运行与部署
-
-### 本地运行
-
-```bash
-python -m http.server 4173 -d frontend
-```
-
-然后打开：
-
-```text
-http://localhost:4173
-```
-
-### 部署到 Vercel
-
-1. 导入当前仓库
-2. Root Directory 设为 `frontend`
-3. 作为静态站点部署
-4. `frontend/config.js` 中的地址和 RPC 会暴露给前端用户，因此只放公开信息，不要放私钥
-
-## 演示模式 / 必中奖
-
-### 开启
-
-`.env`：
-
-```text
-DEMO_MODE_ENABLED=true
-DEMO_FORCED_PRIZE_TIER=3
-DEMO_REMAINING_TICKETS=1
-```
-
-执行：
-
-```bash
-forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
-
-### 关闭
-
-`.env`：
-
-```text
-DEMO_MODE_ENABLED=false
-```
-
-执行同一个脚本：
-
-```bash
-forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
-  --rpc-url "$DESTINATION_RPC_URL" \
-  --broadcast
-```
-
-## 当前演示地址
-
-- `SCRATCH_SOURCE_ADDR=0xc6D1C9500E25ebDd55650Ca04f8C97e6616770C5`
-- `SCRATCH_GAME_ADDR=0x092B84CAeDe9e1c52C7bACA840372f4c18baA3F1`
-- `SCRATCH_REACTIVE_ADDR=0x4387e5F6C79ae885C9E2AcCB47cD4E31085BaeaF`
-
-## 当前浏览器地址
-
-- Sepolia Etherscan：`https://sepolia.etherscan.io`
-- Reactive Explorer：`https://reactscan.net/`
+- `script/Counter.s.sol` and `test/Counter.t.sol` are leftover files from the old template and are unrelated to the current deployment flow.
+- `topic_0` changes whenever the event signature changes. Even renaming the event from `ContractReceive` to `Received` will change the hash.
+- Since you have already changed it back to `Received(address,address,uint256)`, if it fully matches the event signature in the online README, you can directly use the official README's `topic_0` instead of necessarily running `cast keccak` yourself.
+- However, the `_topic_0` parameter itself still needs to be passed to `BasicDemoReactiveContract`. The point is only that “this value can be copied from the official docs,” not that “this parameter is no longer needed.”
+- The safest approach is still to run `cast keccak "Received(address,address,uint256)"` yourself, because it computes the hash locally, does not depend on on-chain state, and has no side effects.

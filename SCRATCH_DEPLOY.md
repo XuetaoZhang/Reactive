@@ -1,43 +1,45 @@
-# Reactive 刮刮乐部署说明
+# Reactive Scratch Deployment Guide
 
-本文档对应当前项目中的三份核心合约：
+This document covers deployment for the Reactive scratch-card demo.
+
+This document corresponds to the three core contracts in the current project:
 
 - `src/ScratchSource.sol`
 - `src/ScratchReactive.sol`
 - `src/ScratchGame.sol`
 
-完整链路如下：
+The complete flow is as follows:
 
-1. 用户在源链购买彩票。
-2. `ScratchSource` 发出 `TicketPurchased` 事件。
-3. `ScratchReactive` 订阅该事件，并通过 Reactive Network 发起目标链回调。
-4. `ScratchGame` 在目标链接收回调，创建票据并请求 Chainlink VRF 随机数。
-5. Chainlink VRF 回调目标链合约，写入中奖结果。
-6. 用户在前端刮开奖票并领取奖金。
+1. The user buys a ticket on the source chain.
+2. `ScratchSource` emits the `TicketPurchased` event.
+3. `ScratchReactive` subscribes to that event and triggers a destination-chain callback through Reactive Network.
+4. `ScratchGame` receives the callback on the destination chain, creates the ticket, and requests Chainlink VRF randomness.
+5. Chainlink VRF calls back the destination-chain contract and writes the prize result on-chain.
+6. The user scratches the ticket in the frontend and claims the prize.
 
-## 一、合约职责
+## I. Contract responsibilities
 
 `ScratchSource`
 
-- 部署在源链。
-- 接收购票金额。
-- 发出 `TicketPurchased(ticketId, player, roundId, amount)` 事件。
+- Deployed on the source chain.
+- Receives the ticket payment.
+- Emits the `TicketPurchased(ticketId, player, roundId, amount)` event.
 
 `ScratchReactive`
 
-- 部署在 Reactive Network。
-- 监听 `ScratchSource` 的购票事件。
-- 将 `ticketId`、`player`、`roundId`、`amount`、`sourceTxHash` 转发到目标链。
-- 部署后需要额外执行一次激活订阅。
+- Deployed on Reactive Network.
+- Listens for the ticket-purchase event from `ScratchSource`.
+- Forwards `ticketId`, `player`, `roundId`, `amount`, and `sourceTxHash` to the destination chain.
+- After deployment, you must additionally activate the subscription once.
 
 `ScratchGame`
 
-- 部署在目标链。
-- 接收 Reactive 回调后创建票据。
-- 请求 Chainlink VRF 随机数。
-- 根据随机数结算奖级并发奖。
+- Deployed on the destination chain.
+- Creates the ticket after receiving the Reactive callback.
+- Requests Chainlink VRF randomness.
+- Settles the prize tier and payout based on the random result.
 
-## 二、构造函数参数
+## II. Constructor parameters
 
 `ScratchSource(uint256 ticketPrice, uint256 initialRoundId)`
 
@@ -59,25 +61,25 @@
     bool vrfNativePayment
 )`
 
-## 三、准备事件 Topic
+## III. Prepare the event topic
 
-`ScratchReactive` 需要订阅下面这个事件签名：
+`ScratchReactive` needs to subscribe to the following event signature:
 
 ```text
 TicketPurchased(uint256,address,uint256,uint256)
 ```
 
-执行：
+Run:
 
 ```bash
 cast keccak "TicketPurchased(uint256,address,uint256,uint256)"
 ```
 
-把结果填入 `.env` 的 `TICKET_PURCHASED_TOPIC0`。
+Put the result into `TICKET_PURCHASED_TOPIC0` in `.env`.
 
-## 四、部署 `ScratchSource`
+## IV. Deploy `ScratchSource`
 
-脚本方式：
+Using the script:
 
 ```bash
 forge script script/DeployScratchSource.s.sol:DeployScratchSourceScript \
@@ -85,30 +87,30 @@ forge script script/DeployScratchSource.s.sol:DeployScratchSourceScript \
   --broadcast
 ```
 
-当前默认参数：
+Current default parameters:
 
-- `SCRATCH_TICKET_PRICE=10000000000000000`，也就是 `0.01 ETH`
+- `SCRATCH_TICKET_PRICE=10000000000000000`, which is `0.01 ETH`
 - `SCRATCH_INITIAL_ROUND_ID=1`
 
-部署完成后，把地址写入：
+After deployment, write the address into:
 
 ```text
 SCRATCH_SOURCE_ADDR=0x...
 ```
 
-## 五、配置 Chainlink VRF
+## V. Configure Chainlink VRF
 
-先打开官方订阅管理页面：
+First open the official subscription management page:
 
 - `https://vrf.chain.link/`
 
-你需要准备：
+You need to prepare:
 
-1. 一个 `Ethereum Sepolia` 上的 VRF v2.5 subscription。
-2. 给 subscription 充值测试资金。
-3. 部署 `ScratchGame` 后，把 `ScratchGame` 地址添加为 consumer。
+1. A VRF v2.5 subscription on `Ethereum Sepolia`.
+2. Fund the subscription with test assets.
+3. After deploying `ScratchGame`, add the `ScratchGame` address as a consumer.
 
-当前 Sepolia 使用的参数：
+Parameters currently used on Sepolia:
 
 ```text
 VRF_COORDINATOR_ADDR=0x9DdfaCa8183c41ad55329BdeeD9F6A8d53168B1B
@@ -118,15 +120,15 @@ VRF_CALLBACK_GAS_LIMIT=200000
 VRF_NATIVE_PAYMENT=true
 ```
 
-把你的订阅 ID 填入：
+Fill in your subscription ID here:
 
 ```text
-VRF_SUBSCRIPTION_ID=<你的订阅ID>
+VRF_SUBSCRIPTION_ID=<your subscription ID>
 ```
 
-## 六、部署 `ScratchGame`
+## VI. Deploy `ScratchGame`
 
-脚本方式：
+Using the script:
 
 ```bash
 forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
@@ -134,7 +136,7 @@ forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
   --broadcast
 ```
 
-当前脚本会读取：
+The current script reads:
 
 - `DESTINATION_CALLBACK_PROXY_ADDR`
 - `VRF_COORDINATOR_ADDR`
@@ -145,22 +147,22 @@ forge script script/DeployScratchGame.s.sol:DeployScratchGameScript \
 - `VRF_NATIVE_PAYMENT`
 - `SCRATCH_GAME_INITIAL_FUNDING`
 
-部署完成后：
+After deployment:
 
-1. 把地址写入 `.env`
-2. 去 `vrf.chain.link`
-3. 在你的 subscription 中点击 `Add consumer`
-4. 添加 `SCRATCH_GAME_ADDR`
+1. Write the address into `.env`.
+2. Go to `vrf.chain.link`.
+3. Click `Add consumer` in your subscription.
+4. Add `SCRATCH_GAME_ADDR`.
 
-也就是说：
+In other words:
 
 ```text
 SCRATCH_GAME_ADDR=0x...
 ```
 
-## 七、部署 `ScratchReactive`
+## VII. Deploy `ScratchReactive`
 
-脚本方式：
+Using the script:
 
 ```bash
 forge script script/DeployScratchReactive.s.sol:DeployScratchReactiveScript \
@@ -168,15 +170,15 @@ forge script script/DeployScratchReactive.s.sol:DeployScratchReactiveScript \
   --broadcast
 ```
 
-部署完成后，把地址写入：
+After deployment, write the address into:
 
 ```text
 SCRATCH_REACTIVE_ADDR=0x...
 ```
 
-## 八、激活 Reactive 订阅
+## VIII. Activate the Reactive subscription
 
-部署完 `ScratchReactive` 后，需要手动激活监听：
+After deploying `ScratchReactive`, you must manually activate the listener:
 
 ```bash
 forge script script/ActivateScratchReactiveSubscription.s.sol:ActivateScratchReactiveSubscriptionScript \
@@ -184,7 +186,7 @@ forge script script/ActivateScratchReactiveSubscription.s.sol:ActivateScratchRea
   --broadcast
 ```
 
-或者直接用：
+Or use this directly:
 
 ```bash
 cast send "$SCRATCH_REACTIVE_ADDR" \
@@ -193,17 +195,17 @@ cast send "$SCRATCH_REACTIVE_ADDR" \
   --rpc-url "$REACTIVE_RPC_URL"
 ```
 
-## 九、绑定目标链回调身份
+## IX. Bind the destination-chain callback sender
 
-`ScratchGame` 需要绑定 Reactive 回调发送者身份。
+`ScratchGame` needs to bind the Reactive callback sender identity.
 
-注意：
+Note:
 
-- 这里不是填 `SCRATCH_REACTIVE_ADDR`
-- 而是填 Reactive Network 识别到的实际发送身份
-- 当前项目里就是 Reactive 部署钱包地址
+- This is not `SCRATCH_REACTIVE_ADDR`.
+- Instead, use the actual sender identity recognized by Reactive Network.
+- In this project, that is the Reactive deployment wallet address.
 
-执行：
+Run:
 
 ```bash
 forge script script/BindScratchGameReactive.s.sol:BindScratchGameReactiveScript \
@@ -211,15 +213,15 @@ forge script script/BindScratchGameReactive.s.sol:BindScratchGameReactiveScript 
   --broadcast
 ```
 
-对应环境变量：
+Corresponding environment variable:
 
 ```text
 EXPECTED_REACTIVE_SENDER_ADDR=0x...
 ```
 
-## 十、购票测试
+## X. Ticket purchase test
 
-如果你不用前端，也可以直接在源链手动购票：
+If you do not use the frontend, you can also buy a ticket manually on the source chain:
 
 ```bash
 cast send "$SCRATCH_SOURCE_ADDR" \
@@ -229,35 +231,39 @@ cast send "$SCRATCH_SOURCE_ADDR" \
   "buyTicket()"
 ```
 
-一张票正常情况下会依次经历：
+Under normal conditions, a ticket goes through these stages in order:
 
 1. `TicketPurchased`
 2. `TicketOpened`
 3. `RandomnessRequested`
 4. `RandomnessFulfilled`
-5. 前端可刮开并领取奖金
+5. The frontend can open the Scratch Card and claim the prize.
 
-## 十一、演示必中奖开关
+## XI. Demo-only forced-win mode
 
-为了黑客松演示稳定，`ScratchGame` 支持演示模式。
+This section is for live demos only.
 
-开启后：
+> Warning
+>
+> Forced-win mode is not normal gameplay behavior and should not be used for production-like or unbiased-randomness demonstrations.
 
-- 仍然会真实请求 Chainlink VRF
-- 随机数仍然会真实写入链上
-- 但前 `N` 张票的奖级会被强制设为你指定的档位
-- 用完后自动关闭
+After enabling it:
 
-可用奖级：
+- It still makes real Chainlink VRF requests.
+- The random result is still written on-chain for real.
+- But the prize tier of the first `N` tickets will be forced to the tier you specify.
+- It automatically turns off after those tickets are used up.
 
-- `1`：回本
-- `2`：银奖
-- `3`：金奖
-- `4`：头奖
+Available prize tiers:
 
-### 1. 开启必中奖
+- `1`: break even
+- `2`: silver prize
+- `3`: gold prize
+- `4`: jackpot
 
-先设置 `.env`：
+### 1. Enable forced win
+
+First set the demo-only variables in `.env`:
 
 ```text
 DEMO_MODE_ENABLED=true
@@ -265,7 +271,7 @@ DEMO_FORCED_PRIZE_TIER=3
 DEMO_REMAINING_TICKETS=1
 ```
 
-然后执行：
+Then run:
 
 ```bash
 forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
@@ -273,15 +279,15 @@ forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScrip
   --broadcast
 ```
 
-这表示：
+This means:
 
-- 下一张票必定是 `3` 档，也就是金奖
-- 只生效 `1` 次
-- 用完后自动关闭
+- The next ticket will definitely be tier `3`, which is the gold prize.
+- It only takes effect once.
+- It turns off automatically after use.
 
-### 2. 关闭必中奖
+### 2. Disable forced win
 
-如果比赛演示结束后要恢复真实概率，设置：
+If you want to restore real probabilities after the demo, set:
 
 ```text
 DEMO_MODE_ENABLED=false
@@ -289,7 +295,7 @@ DEMO_FORCED_PRIZE_TIER=3
 DEMO_REMAINING_TICKETS=1
 ```
 
-然后执行同一条脚本：
+Then run the same script:
 
 ```bash
 forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScript \
@@ -297,11 +303,11 @@ forge script script/ConfigureScratchGameDemo.s.sol:ConfigureScratchGameDemoScrip
   --broadcast
 ```
 
-关闭后，后续票据完全按真实随机数结算。
+After disabling it, later tickets will be settled entirely according to real randomness.
 
-## 十二、领奖
+## XII. Claim the prize
 
-当票据状态变成 `Ready` 后，用户可以在目标链领奖：
+Once the ticket status becomes `Ready`, the user can claim the prize on the destination chain:
 
 ```bash
 cast send "$SCRATCH_GAME_ADDR" \
@@ -311,32 +317,32 @@ cast send "$SCRATCH_GAME_ADDR" \
   "$TICKET_ID"
 ```
 
-如果使用前端，则在刮开奖票后点击“领取奖金”即可。
+If you are using the frontend, simply click **Claim Prize** after scratching the Scratch Card open.
 
-## 十三、本地测试
+## XIII. Local testing
 
-执行：
+Run:
 
 ```bash
 forge test --match-contract ScratchFlowTest -vv
 ```
 
-当前测试覆盖：
+Current test coverage includes:
 
-- 精确票价校验
-- 完整购票到领奖流程
-- 演示必中奖模式
+- Exact ticket price validation
+- Full ticket-purchase-to-prize-claim flow
+- Demo forced-win mode
 
-## 十四、当前演示建议顺序
+## XIV. Recommended demo order
 
-比赛现场建议按下面顺序演示：
+For a live demo, the recommended order is:
 
-1. 打开前端并连接钱包
-2. 展示底部三个合约地址
-3. 说明用户先在源链买票
-4. 等待票据在目标链 materialize
-5. 展示真实 VRF 请求
-6. 刮开奖票
-7. 展示中奖记录和奖金领取
+1. Open the frontend and connect the wallet.
+2. Show the three contract addresses at the bottom.
+3. Explain that the user buys a ticket on the source chain first.
+4. Wait for the ticket to materialize on the destination chain.
+5. Show the real VRF request.
+6. Scratch open the Scratch Card.
+7. Show the win record and prize claim.
 
-如果你要稳定演示中奖，保持演示模式开启即可。
+If you want a stable winning demo, keep demo mode enabled only for the specific demo run.

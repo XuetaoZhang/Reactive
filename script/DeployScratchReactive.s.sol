@@ -17,11 +17,7 @@ contract DeployScratchReactiveScript is Script {
 
         vm.startBroadcast(deployerPrivateKey);
         deployed = new ScratchReactive{value: initialFunding}(
-            originChainId,
-            destinationChainId,
-            sourceContract,
-            ticketPurchasedTopic0,
-            scratchGame
+            originChainId, destinationChainId, sourceContract, ticketPurchasedTopic0, scratchGame
         );
         vm.stopBroadcast();
 

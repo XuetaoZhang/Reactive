@@ -14,25 +14,17 @@ contract ScratchReactive is IReactive, AbstractReactive {
     error UnexpectedTopic0(uint256 actualTopic0);
     error InvalidPlayer();
     error InvalidAmount();
-    
+
     event SubscriptionActivated(
-        uint256 indexed originChainId,
-        address indexed sourceContract,
-        uint256 indexed ticketPurchasedTopic0
+        uint256 indexed originChainId, address indexed sourceContract, uint256 indexed ticketPurchasedTopic0
     );
-    
+
     event SubscriptionDeactivated(
-        uint256 indexed originChainId,
-        address indexed sourceContract,
-        uint256 indexed ticketPurchasedTopic0
+        uint256 indexed originChainId, address indexed sourceContract, uint256 indexed ticketPurchasedTopic0
     );
 
     event TicketForwarded(
-        uint256 indexed ticketId,
-        address indexed player,
-        uint256 indexed roundId,
-        uint256 amount,
-        bytes32 sourceTxHash
+        uint256 indexed ticketId, address indexed player, uint256 indexed roundId, uint256 amount, bytes32 sourceTxHash
     );
 
     uint64 public constant CALLBACK_GAS_LIMIT = 900_000;
@@ -72,12 +64,7 @@ contract ScratchReactive is IReactive, AbstractReactive {
         if (subscriptionActive) revert SubscriptionAlreadyActive();
 
         service.subscribe(
-            originChainId,
-            sourceContract,
-            ticketPurchasedTopic0,
-            REACTIVE_IGNORE,
-            REACTIVE_IGNORE,
-            REACTIVE_IGNORE
+            originChainId, sourceContract, ticketPurchasedTopic0, REACTIVE_IGNORE, REACTIVE_IGNORE, REACTIVE_IGNORE
         );
 
         subscriptionActive = true;
@@ -88,12 +75,7 @@ contract ScratchReactive is IReactive, AbstractReactive {
         if (!subscriptionActive) revert SubscriptionNotActive();
 
         service.unsubscribe(
-            originChainId,
-            sourceContract,
-            ticketPurchasedTopic0,
-            REACTIVE_IGNORE,
-            REACTIVE_IGNORE,
-            REACTIVE_IGNORE
+            originChainId, sourceContract, ticketPurchasedTopic0, REACTIVE_IGNORE, REACTIVE_IGNORE, REACTIVE_IGNORE
         );
 
         subscriptionActive = false;

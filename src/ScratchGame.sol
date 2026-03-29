@@ -17,6 +17,8 @@ contract ScratchGame is AbstractCallback {
     error InvalidRandomWords();
     error InvalidPrizeTier();
     error PrizePoolTooSmall();
+    error ExpectedReactiveSenderNotSet();
+    error UnexpectedReactiveSender(address actualReactiveSender);
 
     enum TicketStatus {
         None,
@@ -40,32 +42,24 @@ contract ScratchGame is AbstractCallback {
     event ExpectedReactiveSenderUpdated(address indexed oldSender, address indexed newSender);
     event RandomnessCoordinatorUpdated(address indexed oldCoordinator, address indexed newCoordinator);
     event VrfConfigUpdated(
-        bytes32 keyHash,
-        uint256 subId,
-        uint16 requestConfirmations,
-        uint32 callbackGasLimit,
-        bool nativePayment
+        bytes32 keyHash, uint256 subId, uint16 requestConfirmations, uint32 callbackGasLimit, bool nativePayment
     );
     event DemoModeConfigured(bool enabled, uint8 forcedPrizeTier, uint256 remainingTickets);
     event DemoOverrideQueued(uint256 indexed requestId, uint8 forcedPrizeTier);
     event DemoOverrideApplied(uint256 indexed requestId, uint256 indexed ticketId, uint8 forcedPrizeTier);
     event PrizePoolFunded(address indexed funder, uint256 amount);
     event TicketOpened(
-        uint256 indexed ticketId,
-        address indexed player,
-        uint256 indexed roundId,
-        uint256 amountPaid,
-        uint256 requestId
+        uint256 indexed ticketId, address indexed player, uint256 indexed roundId, uint256 amountPaid, uint256 requestId
     );
     event RandomnessRequested(uint256 indexed requestId, uint256 indexed ticketId);
     event RandomnessFulfilled(
-        uint256 indexed requestId,
-        uint256 indexed ticketId,
-        uint256 randomWord,
-        uint8 prizeTier,
-        uint256 prizeAmount
+        uint256 indexed requestId, uint256 indexed ticketId, uint256 randomWord, uint8 prizeTier, uint256 prizeAmount
     );
     event PrizeClaimed(uint256 indexed ticketId, address indexed player, uint256 prizeAmount);
+    event PrizeReserved(
+        uint256 indexed requestId, uint256 indexed ticketId, uint256 prizeAmount, uint256 totalReserved
+    );
+    event PrizeReserveReleased(uint256 indexed ticketId, uint256 prizeAmount, uint256 totalReserved);
 
     address public owner;
     address public expectedReactiveSender;
@@ -78,6 +72,7 @@ contract ScratchGame is AbstractCallback {
     bool public demoModeEnabled;
     uint8 public demoForcedPrizeTier;
     uint256 public demoRemainingTickets;
+    uint256 public totalReservedPrizeAmount;
 
     uint32 public constant VRF_NUM_WORDS = 1;
     uint8 internal constant MAX_PRIZE_TIER = 4;
@@ -94,18 +89,11 @@ contract ScratchGame is AbstractCallback {
         uint16 _vrfRequestConfirmations,
         uint32 _vrfCallbackGasLimit,
         bool _vrfNativePayment
-    )
-        AbstractCallback(_callbackSender)
-        payable
-    {
+    ) payable AbstractCallback(_callbackSender) {
         owner = msg.sender;
         randomnessCoordinator = _randomnessCoordinator;
         _setVrfConfig(
-            _vrfKeyHash,
-            _vrfSubscriptionId,
-            _vrfRequestConfirmations,
-            _vrfCallbackGasLimit,
-            _vrfNativePayment
+            _vrfKeyHash, _vrfSubscriptionId, _vrfRequestConfirmations, _vrfCallbackGasLimit, _vrfNativePayment
         );
     }
 
@@ -120,9 +108,8 @@ contract ScratchGame is AbstractCallback {
     }
 
     modifier onlyExpectedReactiveSender(address reactiveSender) {
-        if (expectedReactiveSender != address(0) && expectedReactiveSender != reactiveSender) {
-            revert Unauthorized();
-        }
+        if (expectedReactiveSender == address(0)) revert ExpectedReactiveSenderNotSet();
+        if (expectedReactiveSender != reactiveSender) revert UnexpectedReactiveSender(reactiveSender);
         _;
     }
 
@@ -151,13 +138,7 @@ contract ScratchGame is AbstractCallback {
         uint32 newCallbackGasLimit,
         bool newNativePayment
     ) external onlyOwner {
-        _setVrfConfig(
-            newKeyHash,
-            newSubscriptionId,
-            newRequestConfirmations,
-            newCallbackGasLimit,
-            newNativePayment
-        );
+        _setVrfConfig(newKeyHash, newSubscriptionId, newRequestConfirmations, newCallbackGasLimit, newNativePayment);
     }
 
     function configureDemoMode(bool enabled, uint8 forcedPrizeTier, uint256 remainingTickets) external onlyOwner {
@@ -182,22 +163,27 @@ contract ScratchGame is AbstractCallback {
         bytes32 sourceTxHash
     ) external authorizedSenderOnly onlyExpectedReactiveSender(reactiveSender) {
         if (player == address(0)) revert InvalidAddress();
-        if (tickets[ticketId].status != TicketStatus.None) revert TicketAlreadyExists();
-
-        uint256 requestId = _requestRandomness(ticketId);
-        _queueDemoOverride(requestId);
+        Ticket storage ticket = tickets[ticketId];
+        if (ticket.status != TicketStatus.None) revert TicketAlreadyExists();
 
         tickets[ticketId] = Ticket({
             player: player,
             amountPaid: amountPaid,
             roundId: roundId,
             status: TicketStatus.PendingVRF,
-            requestId: requestId,
+            requestId: 0,
             randomWord: 0,
             prizeTier: 0,
             prizeAmount: 0,
             sourceTxHash: sourceTxHash
         });
+
+        uint256 requestId = _requestRandomness();
+        requestToTicketId[requestId] = ticketId;
+        emit RandomnessRequested(requestId, ticketId);
+
+        _queueDemoOverride(requestId);
+        ticket.requestId = requestId;
 
         emit TicketOpened(ticketId, player, roundId, amountPaid, requestId);
     }
@@ -212,41 +198,49 @@ contract ScratchGame is AbstractCallback {
         Ticket storage ticket = tickets[ticketId];
         if (ticket.player != msg.sender) revert InvalidTicketOwner();
         if (ticket.status != TicketStatus.Ready) revert InvalidTicketStatus();
-        if (ticket.prizeAmount > address(this).balance) revert PrizePoolTooSmall();
+
+        uint256 prizeAmount = ticket.prizeAmount;
+        if (prizeAmount != 0) {
+            if (prizeAmount > totalReservedPrizeAmount) revert PrizePoolTooSmall();
+            if (prizeAmount > address(this).balance) revert PrizePoolTooSmall();
+
+            totalReservedPrizeAmount -= prizeAmount;
+            emit PrizeReserveReleased(ticketId, prizeAmount, totalReservedPrizeAmount);
+        }
 
         ticket.status = TicketStatus.Claimed;
 
-        if (ticket.prizeAmount != 0) {
-            (bool success, ) = ticket.player.call{value: ticket.prizeAmount}("");
+        if (prizeAmount != 0) {
+            (bool success,) = ticket.player.call{value: prizeAmount}("");
             require(success, "Prize transfer failed");
         }
 
-        emit PrizeClaimed(ticketId, ticket.player, ticket.prizeAmount);
+        emit PrizeClaimed(ticketId, ticket.player, prizeAmount);
     }
 
     function getTicketState(uint256 ticketId) external view returns (Ticket memory) {
         return tickets[ticketId];
     }
 
-    function _requestRandomness(uint256 ticketId) internal returns (uint256 requestId) {
+    function availablePrizePool() external view returns (uint256) {
+        return _availablePrizePool();
+    }
+
+    function _requestRandomness() internal returns (uint256 requestId) {
         if (randomnessCoordinator == address(0)) revert CoordinatorNotSet();
         if (vrfKeyHash == bytes32(0) || vrfSubscriptionId == 0) revert InvalidVrfConfig();
 
-        requestId = IVRFCoordinatorV2Plus(randomnessCoordinator).requestRandomWords(
-            VRFV2PlusClient.RandomWordsRequest({
+        requestId = IVRFCoordinatorV2Plus(randomnessCoordinator)
+            .requestRandomWords(
+                VRFV2PlusClient.RandomWordsRequest({
                 keyHash: vrfKeyHash,
                 subId: vrfSubscriptionId,
                 requestConfirmations: vrfRequestConfirmations,
                 callbackGasLimit: vrfCallbackGasLimit,
                 numWords: VRF_NUM_WORDS,
-                extraArgs: VRFV2PlusClient.argsToBytes(
-                    VRFV2PlusClient.ExtraArgsV1({nativePayment: vrfNativePayment})
-                )
+                extraArgs: VRFV2PlusClient.argsToBytes(VRFV2PlusClient.ExtraArgsV1({nativePayment: vrfNativePayment}))
             })
-        );
-
-        emit RandomnessRequested(requestId, ticketId);
-        requestToTicketId[requestId] = ticketId;
+            );
     }
 
     function _resolvePrize(uint256 amountPaid, uint256 randomWord)
@@ -269,7 +263,7 @@ contract ScratchGame is AbstractCallback {
             return (1, amountPaid);
         }
 
-        return (0, 0);
+        return (1, amountPaid);
     }
 
     function _prizeForTier(uint256 amountPaid, uint8 prizeTier) internal pure returns (uint256 prizeAmount) {
@@ -295,6 +289,16 @@ contract ScratchGame is AbstractCallback {
             delete demoForcedTierByRequestId[requestId];
             emit DemoOverrideApplied(requestId, ticketId, forcedPrizeTier);
         }
+
+        if (prizeAmount != 0) {
+            uint256 availablePool = _availablePrizePool();
+            if (prizeAmount > availablePool) revert PrizePoolTooSmall();
+
+            totalReservedPrizeAmount += prizeAmount;
+            emit PrizeReserved(requestId, ticketId, prizeAmount, totalReservedPrizeAmount);
+        }
+
+        delete requestToTicketId[requestId];
 
         ticket.randomWord = randomWord;
         ticket.prizeTier = prizeTier;
@@ -323,11 +327,7 @@ contract ScratchGame is AbstractCallback {
         vrfNativePayment = newNativePayment;
 
         emit VrfConfigUpdated(
-            newKeyHash,
-            newSubscriptionId,
-            newRequestConfirmations,
-            newCallbackGasLimit,
-            newNativePayment
+            newKeyHash, newSubscriptionId, newRequestConfirmations, newCallbackGasLimit, newNativePayment
         );
     }
 
@@ -341,5 +341,10 @@ contract ScratchGame is AbstractCallback {
         if (demoRemainingTickets == 0) {
             demoModeEnabled = false;
         }
+    }
+
+    function _availablePrizePool() internal view returns (uint256) {
+        if (address(this).balance <= totalReservedPrizeAmount) return 0;
+        return address(this).balance - totalReservedPrizeAmount;
     }
 }

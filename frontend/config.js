@@ -16,8 +16,11 @@ export const SCRATCH_CONFIG = {
     blockExplorerUrl: "https://sepolia.etherscan.io",
   },
   reactiveChain: {
+    id: 5318007,
     name: "Reactive Network",
-    blockExplorerUrl: "https://reactscan.net",
+    currencySymbol: "lREACT",
+    blockExplorerUrl: "https://lasna.reactscan.net",
+    senderAddress: "0xDFD4AbAf11a1a8773983e708c34A0c8Cf7c41Bd6",
   },
   contracts: {
     source: "0xc6D1C9500E25ebDd55650Ca04f8C97e6616770C5",
@@ -28,10 +31,10 @@ export const SCRATCH_CONFIG = {
     scratchThreshold: 0.45,
   },
   prizeTiers: [
-    { tier: 0, label: "MISS", accent: "这张没中，再来一张继续冲。", multiplier: "0x" },
-    { tier: 1, label: "1X BACK", accent: "至少回本，票价原路返还。", multiplier: "1x" },
-    { tier: 2, label: "SILVER", accent: "稳定命中 1.5 倍奖励。", multiplier: "1.5x" },
-    { tier: 3, label: "GOLD", accent: "五倍奖励，适合现场演示。", multiplier: "5x" },
-    { tier: 4, label: "JACKPOT", accent: "最高档大奖，现场最炸裂的一张。", multiplier: "50x" },
+    { tier: 0, label: "MISS", accent: "No win this time - grab another one and keep pushing.", multiplier: "0x" },
+    { tier: 1, label: "1X BACK", accent: "At least break even - the ticket price is returned.", multiplier: "1x" },
+    { tier: 2, label: "SILVER", accent: "A steady 1.5x reward.", multiplier: "1.5x" },
+    { tier: 3, label: "GOLD", accent: "5x reward - great for live demos.", multiplier: "5x" },
+    { tier: 4, label: "JACKPOT", accent: "Top-tier jackpot - the most explosive hit on stage.", multiplier: "50x" },
   ],
 };

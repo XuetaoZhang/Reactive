@@ -5,13 +5,9 @@ contract ScratchSource {
     error IncorrectTicketPrice();
     error InvalidTicketPrice();
     error Unauthorized();
+    error InvalidWithdrawalTarget();
 
-    event TicketPurchased(
-        uint256 indexed ticketId,
-        address indexed player,
-        uint256 indexed roundId,
-        uint256 amount
-    );
+    event TicketPurchased(uint256 indexed ticketId, address indexed player, uint256 indexed roundId, uint256 amount);
 
     event TicketPriceUpdated(uint256 oldPrice, uint256 newPrice);
     event RoundIdUpdated(uint256 oldRoundId, uint256 newRoundId);
@@ -70,7 +66,9 @@ contract ScratchSource {
     }
 
     function withdraw(address payable to, uint256 amount) external onlyOwner {
-        (bool success, ) = to.call{value: amount}("");
+        if (to == address(0)) revert InvalidWithdrawalTarget();
+
+        (bool success,) = to.call{value: amount}("");
         require(success, "Withdrawal failed");
 
         emit TreasuryWithdrawal(to, amount);
@@ -80,12 +78,8 @@ contract ScratchSource {
         if (msg.value != ticketPrice) revert IncorrectTicketPrice();
 
         ticketId = nextTicketId++;
-        ticketReceipts[ticketId] = TicketReceipt({
-            player: player,
-            amount: msg.value,
-            roundId: currentRoundId,
-            purchasedAt: block.timestamp
-        });
+        ticketReceipts[ticketId] =
+            TicketReceipt({player: player, amount: msg.value, roundId: currentRoundId, purchasedAt: block.timestamp});
         lastTicketIdByPlayer[player] = ticketId;
 
         emit TicketPurchased(ticketId, player, currentRoundId, msg.value);

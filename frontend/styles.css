@@ -579,6 +579,23 @@ select {
   text-shadow: 0 4px 0 rgba(46, 16, 101, 0.44);
 }
 
+.modal-header {
+  gap: 18px;
+}
+
+.modal-header-actions {
+  display: inline-flex;
+  align-items: center;
+  gap: 12px;
+  flex: 0 0 auto;
+}
+
+.modal-header .pill {
+  min-height: 38px;
+  padding: 8px 14px;
+  font-size: 0.82rem;
+}
+
 .action-copy {
   margin: 14px 0 0;
   color: rgba(255, 250, 240, 0.92);
@@ -590,8 +607,11 @@ select {
   display: inline-flex;
   align-items: center;
   gap: 12px;
-  margin-top: 18px;
-  padding: 12px 16px;
+  margin-top: 0;
+  flex: 1 1 0;
+  min-width: 0;
+  min-height: 52px;
+  padding: 10px 16px;
   border-radius: 18px;
   border: 2px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 196, 0, 0.14);
@@ -634,7 +654,6 @@ select {
 
 .icon-button svg,
 .modal-close svg,
-.trace-toggle-icon svg,
 .trace-arrow svg,
 .trace-node svg {
   width: 22px;
@@ -646,20 +665,34 @@ select {
   fill: none;
 }
 
+.trace-toggle-icon svg {
+  width: 20px;
+  height: 20px;
+  stroke: currentColor;
+  stroke-width: 2.4;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  fill: none;
+}
+
 .flow-tools {
-  display: flex;
-  justify-content: flex-end;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: stretch;
+  gap: 14px;
   margin-top: 14px;
 }
 
 .trace-anchor {
   position: relative;
   display: inline-flex;
+  align-self: stretch;
 }
 
 .trace-toggle-button {
-  width: 54px;
-  height: 54px;
+  width: 52px;
+  min-height: 52px;
+  height: 100%;
   display: inline-grid;
   place-items: center;
   padding: 0;
@@ -695,15 +728,16 @@ select {
   position: absolute;
   top: calc(100% + 12px);
   right: 0;
-  width: min(620px, calc(100vw - 52px));
-  padding: 18px;
-  border-radius: 24px;
-  border: 2px solid rgba(255, 255, 255, 0.16);
+  width: min(840px, calc(100vw - 52px));
+  padding: 20px;
+  border-radius: 28px;
+  border: 2px solid rgba(255, 255, 255, 0.14);
   background:
-    linear-gradient(180deg, rgba(86, 28, 182, 0.96), rgba(55, 18, 120, 0.96)),
+    radial-gradient(circle at top left, rgba(255, 214, 76, 0.08), transparent 24%),
+    linear-gradient(180deg, rgba(90, 30, 192, 0.98), rgba(53, 17, 115, 0.97)),
     rgba(0, 0, 0, 0.24);
   box-shadow:
-    0 24px 64px rgba(23, 6, 53, 0.4),
+    0 28px 72px rgba(23, 6, 53, 0.42),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
   backdrop-filter: blur(18px);
   z-index: 20;
@@ -718,109 +752,180 @@ select {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin-bottom: 14px;
+  margin-bottom: 18px;
+  padding-bottom: 14px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.1);
 }
 
 .trace-kicker {
   color: rgba(255, 249, 236, 0.7);
-  font-size: 0.74rem;
+  font-size: 0.72rem;
   font-weight: 800;
-  letter-spacing: 0.18em;
+  letter-spacing: 0.2em;
   text-transform: uppercase;
 }
 
 .trace-panel-head strong {
   color: #fff7e7;
   font-family: "Baloo 2", cursive;
-  font-size: 1rem;
+  font-size: 1.02rem;
   font-weight: 800;
 }
 
 .trace-lane {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) 38px minmax(0, 1fr) 38px minmax(0, 1fr);
   gap: 10px;
   align-items: stretch;
 }
 
 .trace-step {
-  min-height: 176px;
-  padding: 14px;
-  border-radius: 18px;
+  --trace-accent: rgba(255, 196, 0, 0.92);
+  --trace-accent-soft: rgba(255, 196, 0, 0.16);
+  position: relative;
+  min-height: 0;
+  padding: 18px;
+  border-radius: 22px;
   border: 1px solid rgba(255, 255, 255, 0.08);
-  background: rgba(255, 255, 255, 0.06);
+  background:
+    radial-gradient(circle at top left, var(--trace-accent-soft), transparent 38%),
+    linear-gradient(180deg, rgba(255, 255, 255, 0.08), rgba(255, 255, 255, 0.04)),
+    rgba(255, 255, 255, 0.05);
+  display: grid;
+  gap: 14px;
+  overflow: hidden;
+}
+
+.trace-step::before {
+  content: "";
+  position: absolute;
+  inset: 0 0 auto 0;
+  height: 3px;
+  background: linear-gradient(90deg, var(--trace-accent), rgba(255, 255, 255, 0.16));
+  opacity: 0.95;
+}
+
+.trace-step-source {
+  --trace-accent: rgba(255, 184, 77, 0.95);
+  --trace-accent-soft: rgba(255, 184, 77, 0.16);
+}
+
+.trace-step-reactive {
+  --trace-accent: rgba(123, 213, 255, 0.95);
+  --trace-accent-soft: rgba(123, 213, 255, 0.16);
+}
+
+.trace-step-destination {
+  --trace-accent: rgba(255, 112, 163, 0.95);
+  --trace-accent-soft: rgba(255, 112, 163, 0.16);
 }
 
 .trace-step.is-active {
-  border-color: rgba(255, 196, 0, 0.28);
-  box-shadow: inset 0 0 0 1px rgba(255, 196, 0, 0.16);
+  border-color: rgba(255, 220, 132, 0.34);
+  box-shadow:
+    0 16px 34px rgba(26, 9, 58, 0.18),
+    inset 0 0 0 1px rgba(255, 220, 132, 0.18);
 }
 
 .trace-step.is-complete {
   border-color: rgba(68, 209, 108, 0.3);
-  box-shadow: inset 0 0 0 1px rgba(68, 209, 108, 0.14);
+  box-shadow:
+    0 16px 34px rgba(18, 40, 28, 0.16),
+    inset 0 0 0 1px rgba(68, 209, 108, 0.14);
 }
 
 .trace-step-top {
   display: flex;
   align-items: flex-start;
   justify-content: space-between;
-  gap: 10px;
+  gap: 12px;
+  flex-wrap: wrap;
 }
 
 .trace-step-head {
   display: flex;
-  align-items: center;
-  gap: 12px;
+  align-items: flex-start;
+  gap: 14px;
+  min-width: 0;
+  flex: 1 1 auto;
 }
 
 .trace-node {
-  width: 38px;
-  height: 38px;
+  width: 46px;
+  height: 46px;
   flex: 0 0 auto;
-  display: grid;
-  place-items: center;
-  border-radius: 12px;
-  background: linear-gradient(180deg, rgba(255, 212, 74, 0.26), rgba(255, 138, 0, 0.18));
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.08);
+  background:
+    linear-gradient(180deg, rgba(255, 255, 255, 0.14), rgba(255, 255, 255, 0.06)),
+    linear-gradient(180deg, var(--trace-accent-soft), rgba(255, 255, 255, 0.04));
   color: #fff6df;
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.08),
+    0 10px 24px rgba(23, 6, 53, 0.18);
+}
+
+.trace-step-copy {
+  min-width: 0;
+  display: grid;
+  gap: 4px;
+}
+
+.trace-step-kicker {
+  display: block;
+  color: rgba(255, 245, 228, 0.6);
+  font-size: 0.68rem;
+  font-weight: 800;
+  letter-spacing: 0.16em;
+  text-transform: uppercase;
 }
 
 .trace-step-top strong {
   display: block;
   color: #fff7e7;
   font-family: "Baloo 2", cursive;
-  font-size: 1rem;
+  font-size: 1.1rem;
   font-weight: 800;
+  line-height: 1.05;
 }
 
-.trace-step-top div span {
+.trace-step-subtitle {
   display: block;
-  margin-top: 2px;
-  color: rgba(255, 249, 236, 0.72);
-  font-size: 0.78rem;
+  color: rgba(255, 249, 236, 0.74);
+  font-size: 0.8rem;
   font-weight: 700;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
+  line-height: 1.45;
 }
 
 .trace-badge {
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-height: 28px;
-  padding: 5px 10px;
+  flex: 0 0 auto;
+  min-height: 30px;
+  padding: 6px 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
   background: rgba(255, 255, 255, 0.08);
   color: rgba(255, 248, 234, 0.88);
-  font-size: 0.7rem;
+  font-size: 0.69rem;
   font-weight: 800;
-  letter-spacing: 0.08em;
+  letter-spacing: 0.12em;
   text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.trace-step-top .trace-badge {
+  margin-left: 0;
 }
 
 .trace-badge.is-active {
-  background: rgba(255, 196, 0, 0.18);
-  color: #fff1bc;
+  background: rgba(255, 220, 132, 0.2);
+  color: #fff0bd;
 }
 
 .trace-badge.is-complete {
@@ -831,27 +936,31 @@ select {
 .trace-links {
   display: flex;
   flex-wrap: wrap;
-  gap: 8px;
-  margin-top: 16px;
+  gap: 10px;
+  margin-top: auto;
+  padding-top: 2px;
 }
 
 .trace-link {
   display: inline-flex;
   align-items: center;
-  min-height: 32px;
-  padding: 7px 11px;
+  min-height: 34px;
+  padding: 7px 12px;
   border-radius: 999px;
   border: 1px solid rgba(255, 255, 255, 0.14);
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.09);
   color: #fff8ea;
-  font-size: 0.76rem;
+  font-size: 0.74rem;
   font-weight: 800;
-  letter-spacing: 0.06em;
+  letter-spacing: 0.04em;
   text-decoration: none;
+  transition: transform 140ms ease, border-color 140ms ease, background 140ms ease;
 }
 
 .trace-link:hover {
   border-color: rgba(255, 255, 255, 0.28);
+  background: rgba(255, 255, 255, 0.13);
+  transform: translateY(-1px);
 }
 
 .trace-link-muted {
@@ -866,9 +975,35 @@ select {
 }
 
 .trace-arrow {
+  position: relative;
   display: grid;
   place-items: center;
+  align-self: center;
   color: rgba(255, 245, 230, 0.72);
+  min-width: 38px;
+}
+
+.trace-arrow::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  right: 2px;
+  top: 50%;
+  height: 2px;
+  border-radius: 999px;
+  background: linear-gradient(90deg, rgba(255, 255, 255, 0.14), rgba(255, 245, 230, 0.48));
+  transform: translateY(-50%);
+}
+
+.trace-arrow svg {
+  position: relative;
+  z-index: 1;
+  width: 24px;
+  height: 24px;
+  padding: 4px;
+  border-radius: 999px;
+  background: rgba(77, 25, 164, 0.86);
+  box-shadow: 0 10px 22px rgba(23, 6, 53, 0.22);
 }
 
 .progress-wrap {
@@ -1234,9 +1369,15 @@ select {
 }
 
 .modal-close {
-  position: absolute;
-  top: 18px;
-  right: 18px;
+  position: static;
+  width: 46px;
+  height: 46px;
+  min-width: 46px;
+  min-height: 46px;
+  border-radius: 16px;
+  border: 2px solid rgba(255, 255, 255, 0.16);
+  background: linear-gradient(180deg, rgba(255, 255, 255, 0.16), rgba(255, 255, 255, 0.08));
+  box-shadow: 0 10px 24px rgba(31, 8, 70, 0.16);
 }
 
 .ticket-stage {
@@ -1449,6 +1590,20 @@ body.tier-2 .current-ticket-panel {
     grid-template-columns: 1fr;
   }
 
+  .flow-tools {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+  }
+
+  .modal-header {
+    flex-wrap: wrap;
+  }
+
+  .modal-header-actions {
+    width: 100%;
+    justify-content: space-between;
+  }
+
   .trace-panel {
     right: -8px;
     width: min(420px, calc(100vw - 28px));
@@ -1456,6 +1611,10 @@ body.tier-2 .current-ticket-panel {
 
   .trace-lane {
     grid-template-columns: 1fr;
+  }
+
+  .trace-step-top {
+    align-items: stretch;
   }
 
   .trace-arrow {

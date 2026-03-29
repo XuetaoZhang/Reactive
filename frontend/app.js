@@ -1,5 +1,5 @@
 import { BrowserProvider, Contract, JsonRpcProvider, formatEther } from "https://esm.sh/ethers@6.13.5";
-import { SCRATCH_CONFIG } from "./config.js?v=20260324-11";
+import { SCRATCH_CONFIG } from "./config.js?v=20260329-7";
 
 const SOURCE_ABI = [
   "function buyTicket() payable returns (uint256)",
@@ -55,6 +55,9 @@ const ZERO_ADDRESS = "0x0000000000000000000000000000000000000000";
 const ZERO_BYTES32 = "0x0000000000000000000000000000000000000000000000000000000000000000";
 const WINNER_LOOKBACK_BLOCKS = 120000n;
 const TRACE_LOOKBACK_BLOCKS = 120000n;
+const MAX_RECENT_WINNER_LOGS = 24;
+const WINNER_REFRESH_INTERVAL_MS = Math.max(SCRATCH_CONFIG.refreshIntervalMs * 3, 15000);
+const TRACE_REFRESH_INTERVAL_MS = Math.max(SCRATCH_CONFIG.refreshIntervalMs + 3000, 8000);
 
 const state = {
   sourceReadProvider: null,
@@ -72,7 +75,7 @@ const state = {
   gameTicket: null,
   recentWinners: [],
   appStatus: APP_STATUS.DISCONNECTED,
-  statusDetail: "连接钱包后即可查看你最近一张 Card 的链上状态。",
+  statusDetail: "Connect your wallet to view the on-chain status of your latest ticket.",
   refreshTimer: null,
   scratchRatio: 0,
   isPointerDown: false,
@@ -87,6 +90,10 @@ const state = {
   pendingAction: null,
   sourceEventWatcher: null,
   ticketEventWatchers: [],
+  recentWinnerLogs: [],
+  recentWinnersLastBlock: null,
+  recentWinnersFetchedAt: 0,
+  traceCache: new Map(),
 };
 
 const scratch = {
@@ -203,7 +210,7 @@ function bindEvents() {
   window.ethereum.on("accountsChanged", async (accounts) => {
     state.account = accounts[0] ?? null;
     if (!state.account) {
-      resetSession(APP_STATUS.DISCONNECTED, "钱包已断开连接。");
+      resetSession(APP_STATUS.DISCONNECTED, "Wallet disconnected.");
       render();
       return;
     }
@@ -238,7 +245,7 @@ function syncSourcePurchaseWatcher() {
       state.latestTicketId = nextTicketId;
       prepareTicketFlow(nextTicketId);
       state.pendingAction = null;
-      applyTicketStatus(APP_STATUS.BRIDGING, "源链购票事件已确认，等待目标链生成 Scratch Card。", nextTicketId);
+      applyTicketStatus(APP_STATUS.BRIDGING, "Source purchase confirmed; waiting for the destination chain to materialize the Scratch Card.", nextTicketId);
       render();
     }
 
@@ -276,19 +283,19 @@ function syncDestinationTicketWatchers() {
 
   watch(state.gameContract.filters.TicketOpened(state.latestTicketId), async () => {
     state.pendingAction = null;
-    applyTicketStatus(APP_STATUS.RANDOMIZING, "目标链 Card 已生成，正在请求 Chainlink VRF。", state.latestTicketId);
+    applyTicketStatus(APP_STATUS.RANDOMIZING, "Destination-chain Scratch Card created; requesting Chainlink VRF.", state.latestTicketId);
     render();
     await refreshSession();
   });
 
   watch(state.gameContract.filters.RandomnessRequested(null, state.latestTicketId), async () => {
-    applyTicketStatus(APP_STATUS.RANDOMIZING, "随机请求已发出，等待 Chainlink VRF 回传结果。", state.latestTicketId);
+    applyTicketStatus(APP_STATUS.RANDOMIZING, "Randomness request sent; waiting for Chainlink VRF fulfillment.", state.latestTicketId);
     render();
     await refreshSession();
   });
 
   watch(state.gameContract.filters.RandomnessFulfilled(null, state.latestTicketId), async () => {
-    applyTicketStatus(APP_STATUS.READY, "随机结果已返回，打开 Card 开始刮奖。", state.latestTicketId);
+    applyTicketStatus(APP_STATUS.READY, "Randomness fulfilled; open the Scratch Card to start scratching.", state.latestTicketId);
     render();
     await refreshSession();
   });
@@ -298,7 +305,7 @@ function syncDestinationTicketWatchers() {
     scratch.revealed = true;
     state.scratchRatio = 1;
     if (state.latestTicketId) persistScratchReveal(String(state.latestTicketId), true);
-    applyTicketStatus(APP_STATUS.FINISHED, "奖金已领取，本轮已经完成结算。", state.latestTicketId);
+    applyTicketStatus(APP_STATUS.FINISHED, "Prize claimed; this round is settled.", state.latestTicketId);
     render();
     await refreshSession();
   });
@@ -316,13 +323,13 @@ function clearDestinationTicketWatchers() {
 
 async function connectWallet() {
   if (!window.ethereum) {
-    setAppStatus(APP_STATUS.ERROR, "未检测到钱包插件，请使用 MetaMask 或其他 EVM 钱包。");
+    setAppStatus(APP_STATUS.ERROR, "No wallet extension detected. Please use MetaMask or another EVM wallet.");
     render();
     return;
   }
 
   if (!state.hasConfiguration) {
-    setAppStatus(APP_STATUS.UNCONFIGURED, "请先在 frontend/config.js 中填入已部署的合约地址。");
+    setAppStatus(APP_STATUS.UNCONFIGURED, "Please fill in the deployed contract addresses in frontend/config.js first.");
     render();
     return;
   }
@@ -339,7 +346,7 @@ async function connectWallet() {
     await refreshSession();
   }
   catch (error) {
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "钱包连接失败。"));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Wallet connection failed."));
     render();
   }
 }
@@ -377,7 +384,7 @@ async function runRefreshSession() {
 
     if (!state.account) {
       clearTicketFlow();
-      setAppStatus(APP_STATUS.DISCONNECTED, "连接钱包后即可查看你最近一张 Card 的链上状态。");
+      setAppStatus(APP_STATUS.DISCONNECTED, "Connect your wallet to view the on-chain status of your latest ticket.");
       state.latestTicketId = null;
       state.sourceReceipt = null;
       state.gameTicket = null;
@@ -390,8 +397,26 @@ async function runRefreshSession() {
 
     const previousTicketKey = toTicketKey(state.latestTicketId);
     const latestTicketId = await state.sourceContract.lastTicketIdByPlayer(state.account);
-    state.latestTicketId = latestTicketId;
     const nextTicketKey = toTicketKey(latestTicketId);
+
+    if (isWaitingForNewTicketId(latestTicketId)) {
+      state.latestTicketId = null;
+      state.sourceReceipt = null;
+      state.gameTicket = null;
+      state.trace = emptyTrace();
+      clearDestinationTicketWatchers();
+      syncSourcePurchaseWatcher();
+      state.recentWinners = await fetchRecentWinners();
+      setAppStatus(APP_STATUS.BUYING, "Purchase transaction submitted; waiting for on-chain confirmation.");
+      render();
+      return;
+    }
+
+    state.latestTicketId = latestTicketId;
+
+    if (state.pendingAction?.type === APP_STATUS.BUYING) {
+      state.pendingAction = null;
+    }
 
     if (previousTicketKey !== nextTicketKey) {
       prepareTicketFlow(latestTicketId);
@@ -405,22 +430,34 @@ async function runRefreshSession() {
       state.trace = emptyTrace();
       clearTicketFlow();
       state.recentWinners = await fetchRecentWinners();
-      setAppStatus(APP_STATUS.IDLE, "当前钱包还没有购票记录，先买一张票开始本轮游戏。");
+      setAppStatus(APP_STATUS.IDLE, "This wallet has no ticket history yet. Buy one to start the run.");
       render();
       return;
     }
 
-    const [sourceReceipt, gameTicket, recentWinners, trace] = await Promise.all([
+    const previousSourceReceipt = previousTicketKey === nextTicketKey ? state.sourceReceipt : null;
+    const previousGameTicket = previousTicketKey === nextTicketKey ? state.gameTicket : null;
+    const previousTrace = previousTicketKey === nextTicketKey ? state.trace : emptyTrace();
+
+    const [sourceReceiptResult, gameTicketResult, recentWinnersResult, traceResult] = await Promise.allSettled([
       state.sourceContract.ticketReceipts(latestTicketId),
       state.gameContract.getTicketState(latestTicketId),
       fetchRecentWinners(),
       fetchTicketTrace(latestTicketId),
     ]);
 
-    state.sourceReceipt = normalizeSourceReceipt(sourceReceipt);
-    state.gameTicket = normalizeGameTicket(gameTicket);
-    state.recentWinners = recentWinners;
-    state.trace = trace;
+    state.sourceReceipt = sourceReceiptResult.status === "fulfilled"
+      ? normalizeSourceReceipt(sourceReceiptResult.value)
+      : previousSourceReceipt;
+    state.gameTicket = gameTicketResult.status === "fulfilled"
+      ? normalizeGameTicket(gameTicketResult.value)
+      : previousGameTicket;
+    state.recentWinners = recentWinnersResult.status === "fulfilled"
+      ? recentWinnersResult.value
+      : state.recentWinners;
+    state.trace = traceResult.status === "fulfilled"
+      ? traceResult.value
+      : previousTrace;
 
     syncScratchRevealState();
     const derivedStatus = deriveAppStatus();
@@ -428,7 +465,16 @@ async function runRefreshSession() {
     render();
   }
   catch (error) {
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "刷新合约状态失败。"));
+    if (isTransientRpcReadError(error)) {
+      const fallbackStatus = state.appStatus === APP_STATUS.DISCONNECTED
+        ? (state.latestTicketId && state.latestTicketId !== 0n ? APP_STATUS.BRIDGING : APP_STATUS.IDLE)
+        : state.appStatus;
+      setAppStatus(fallbackStatus, "Temporary RPC issue while refreshing. Retrying automatically.");
+      render();
+      return;
+    }
+
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Failed to refresh contract state."));
     render();
   }
 }
@@ -438,15 +484,27 @@ async function fetchRecentWinners() {
   if (!state.gameContract || !state.destinationReadProvider) return [];
 
   try {
+    const now = Date.now();
+    if (state.recentWinnersFetchedAt && now - state.recentWinnersFetchedAt < WINNER_REFRESH_INTERVAL_MS) {
+      return state.recentWinners;
+    }
+
     const latestBlock = await state.destinationReadProvider.getBlockNumber();
-    const fromBlock = latestBlock > Number(WINNER_LOOKBACK_BLOCKS)
-      ? latestBlock - Number(WINNER_LOOKBACK_BLOCKS)
-      : 0;
+    const fromBlock = state.recentWinnersLastBlock == null
+      ? latestBlock > Number(WINNER_LOOKBACK_BLOCKS)
+        ? latestBlock - Number(WINNER_LOOKBACK_BLOCKS)
+        : 0
+      : state.recentWinnersLastBlock + 1;
 
-    const logs = await state.gameContract.queryFilter("RandomnessFulfilled", fromBlock, latestBlock);
-    const latestLogs = logs.slice(-8).reverse();
+    const logs = fromBlock <= latestBlock
+      ? await state.gameContract.queryFilter("RandomnessFulfilled", fromBlock, latestBlock)
+      : [];
 
-    return await Promise.all(latestLogs.map(async (log, index) => {
+    state.recentWinnersLastBlock = latestBlock;
+    mergeRecentWinnerLogs(logs);
+
+    const latestLogs = state.recentWinnerLogs.slice(-8).reverse();
+    const winners = await Promise.all(latestLogs.map(async (log, index) => {
       const ticketId = log.args.ticketId;
       const ticket = normalizeGameTicket(await state.gameContract.getTicketState(ticketId));
       return {
@@ -458,9 +516,13 @@ async function fetchRecentWinners() {
         claimed: ticket.status === TICKET_STATUS.Claimed,
       };
     }));
+
+    state.recentWinnersFetchedAt = now;
+    state.recentWinners = winners;
+    return winners;
   }
   catch {
-    return [];
+    return state.recentWinners;
   }
 }
 
@@ -468,30 +530,34 @@ function deriveAppStatus() {
   if (!state.latestTicketId || state.latestTicketId === 0n) {
     return {
       status: APP_STATUS.IDLE,
-      detail: "当前钱包还没有购票记录，先买一张票开始本轮游戏。",
+      detail: "This wallet has no ticket history yet. Buy one to start the run.",
     };
   }
 
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
     return {
       status: APP_STATUS.BRIDGING,
-      detail: "源链已购票，目标链 Scratch Card 正在生成。",
+      detail: "Ticket bought on the source chain; destination-chain Scratch Card is being created.",
     };
   }
 
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
     return {
       status: APP_STATUS.RANDOMIZING,
-      detail: "Card 已生成，正在等待 Chainlink VRF 返回随机结果。",
+      detail: "Scratch Card created; waiting for Chainlink VRF to return the random result.",
     };
   }
 
   if (state.gameTicket.status === TICKET_STATUS.Ready) {
     return {
-      status: scratch.revealed ? APP_STATUS.REVEALED : APP_STATUS.READY,
+      status: scratch.revealed
+        ? state.gameTicket.prizeAmount > 0n ? APP_STATUS.REVEALED : APP_STATUS.FINISHED
+        : APP_STATUS.READY,
       detail: scratch.revealed
-        ? "结果已经揭晓，如有中奖可直接领取奖金。"
-        : "Card 已经就绪，打开后用鼠标刮开奖面。",
+        ? state.gameTicket.prizeAmount > 0n
+          ? "Result revealed. If you won, claim the prize now."
+          : "Result revealed. No prize this round. Buy another ticket to start the next run."
+        : "Scratch Card is ready. Open it and scratch with your mouse.",
     };
   }
 
@@ -499,13 +565,13 @@ function deriveAppStatus() {
     scratch.revealed = true;
     return {
       status: APP_STATUS.FINISHED,
-      detail: "本轮已经结算，可以继续购买下一张 Ticket。",
+      detail: "This round is settled. You can buy the next Ticket.",
     };
   }
 
   return {
     status: APP_STATUS.ERROR,
-    detail: "当前彩票状态异常，请刷新后重试。",
+    detail: "Ticket state is abnormal. Refresh and try again.",
   };
 }
 
@@ -571,9 +637,35 @@ function clearTicketFlow() {
   state.pendingAction = null;
 }
 
+function resetDisplayForNextPurchase() {
+  state.latestTicketId = null;
+  state.sourceReceipt = null;
+  state.gameTicket = null;
+  state.trace = emptyTrace();
+  state.flowTicketKey = null;
+  state.flowStatus = null;
+  scratch.revealed = false;
+  state.scratchRatio = 0;
+  clearDestinationTicketWatchers();
+  closeScratchModal();
+}
+
 function toTicketKey(ticketId) {
   if (!ticketId || ticketId === 0n) return null;
   return ticketId.toString();
+}
+
+function isWaitingForNewTicketId(observedLatestTicketId = state.latestTicketId) {
+  if (state.pendingAction?.type !== APP_STATUS.BUYING) return false;
+
+  const previousTicketKey = state.pendingAction.previousTicketKey ?? null;
+  const nextTicketKey = toTicketKey(observedLatestTicketId);
+
+  if (!previousTicketKey) {
+    return nextTicketKey === null;
+  }
+
+  return nextTicketKey === previousTicketKey;
 }
 
 async function buyTicket() {
@@ -582,12 +674,16 @@ async function buyTicket() {
   try {
     await ensureChain(SCRATCH_CONFIG.sourceChain);
     const writer = state.sourceContract.connect(state.signer);
-    state.pendingAction = { type: APP_STATUS.BUYING };
-    applyTicketStatus(APP_STATUS.BUYING, "正在发起购票交易。");
+    state.pendingAction = {
+      type: APP_STATUS.BUYING,
+      previousTicketKey: toTicketKey(state.latestTicketId),
+    };
+    applyTicketStatus(APP_STATUS.BUYING, "Submitting ticket purchase transaction.");
     render();
 
     const tx = await writer.buyTicket({ value: state.ticketPrice });
-    applyTicketStatus(APP_STATUS.BUYING, "购票交易已提交，等待链上确认。");
+    resetDisplayForNextPurchase();
+    applyTicketStatus(APP_STATUS.BUYING, "Purchase transaction submitted; waiting for on-chain confirmation.");
     render();
 
     await tx.wait();
@@ -599,7 +695,7 @@ async function buyTicket() {
   }
   catch (error) {
     state.pendingAction = null;
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "购票交易失败。"));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Ticket purchase failed."));
     render();
   }
 }
@@ -614,7 +710,7 @@ async function claimPrize() {
       type: APP_STATUS.CLAIMING,
       ticketKey: toTicketKey(state.latestTicketId),
     };
-    applyTicketStatus(APP_STATUS.CLAIMING, "领奖交易已提交，等待链上确认。", state.latestTicketId);
+    applyTicketStatus(APP_STATUS.CLAIMING, "Prize claim transaction submitted; waiting for on-chain confirmation.", state.latestTicketId);
     render();
 
     const tx = await writer.claim(state.latestTicketId);
@@ -625,13 +721,13 @@ async function claimPrize() {
   }
   catch (error) {
     state.pendingAction = null;
-    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "领奖交易失败。"));
+    setAppStatus(APP_STATUS.ERROR, getErrorMessage(error, "Prize claim failed."));
     render();
   }
 }
 
 async function ensureChain(targetChain) {
-  if (!window.ethereum) throw new Error("未检测到钱包提供方。");
+  if (!window.ethereum) throw new Error("No wallet provider detected.");
   if (state.chainId === targetChain.id) return;
 
   const chainHex = `0x${targetChain.id.toString(16)}`;
@@ -769,7 +865,7 @@ function updateScratchRatio() {
     scratch.revealed = true;
     if (state.latestTicketId) persistScratchReveal(String(state.latestTicketId), true);
     if (state.gameTicket?.status === TICKET_STATUS.Ready) {
-      applyTicketStatus(APP_STATUS.REVEALED, "结果已经揭晓，如有中奖可直接领取奖金。", state.latestTicketId);
+      applyTicketStatus(APP_STATUS.REVEALED, "Result revealed. If you won, claim the prize now.", state.latestTicketId);
     }
   }
 
@@ -821,8 +917,25 @@ function canScratch() {
   return state.modalOpen && [APP_STATUS.READY, APP_STATUS.REVEALED, APP_STATUS.FINISHED].includes(state.appStatus);
 }
 
+function hasClaimablePrize() {
+  return Boolean(
+    state.gameTicket &&
+    state.gameTicket.status === TICKET_STATUS.Ready &&
+    state.gameTicket.prizeAmount > 0n
+  );
+}
+
+function isMissedTicketSettled() {
+  return Boolean(
+    state.gameTicket &&
+    state.gameTicket.status === TICKET_STATUS.Ready &&
+    state.gameTicket.prizeAmount === 0n &&
+    scratch.revealed
+  );
+}
+
 function canClaim() {
-  return Boolean(state.gameTicket && state.gameTicket.status === TICKET_STATUS.Ready && scratch.revealed);
+  return Boolean(hasClaimablePrize() && scratch.revealed);
 }
 
 function canOpenScratch() {
@@ -851,14 +964,14 @@ function render() {
   elements.flowProgressLabel.textContent = `${flowPercent}%`;
 
   elements.ticketBadge.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `CARD #${state.latestTicketId.toString()}`
-    : "NO CARD";
+    ? `TICKET #${state.latestTicketId.toString()}`
+    : "NO TICKET";
   elements.ticketPanelTitle.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `CARD #${state.latestTicketId.toString()} · ${destinationStatusLabel()}`
-    : "NO CARD YET";
+    ? `TICKET #${state.latestTicketId.toString()} | ${destinationStatusLabel()}`
+    : "NO TICKET YET";
   elements.machineTicketTitle.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `CARD #${state.latestTicketId.toString()}`
-    : "NO ACTIVE CARD";
+    ? `TICKET #${state.latestTicketId.toString()}`
+    : "NO ACTIVE TICKET";
   elements.machineTicketBody.textContent = machineCopy();
   elements.machineStatusPill.textContent = destinationStatusLabel();
   elements.machineStatusPill.className = `pill ${pillClassForStatus()}`;
@@ -890,12 +1003,14 @@ function render() {
     ? `${formatEther(state.gameTicket.prizeAmount)} ETH`
     : "-";
   elements.modalTicketTitle.textContent = state.latestTicketId && state.latestTicketId !== 0n
-    ? `CARD #${state.latestTicketId.toString()}`
-    : "CARD LOCKED";
+    ? `TICKET #${state.latestTicketId.toString()}`
+    : "TICKET LOCKED";
   elements.modalStatusPill.textContent = destinationStatusLabel();
   elements.modalStatusPill.className = `pill ${pillClassForStatus()}`;
   elements.modalScratchLabel.textContent = scratch.revealed
-    ? "Card opened. CLAIM is unlocked."
+    ? hasClaimablePrize()
+      ? "Scratch Card opened. CLAIM is unlocked."
+      : "Scratch Card opened. No prize on this ticket."
     : `Scratch ${Math.round(SCRATCH_CONFIG.ui.scratchThreshold * 100)}% to unlock CLAIM`;
 
   const scratchPercent = Math.min(100, Math.round(state.scratchRatio * 100));
@@ -905,6 +1020,8 @@ function render() {
   elements.connectButton.textContent = state.account ? formatAddress(state.account) : "CONNECT";
   elements.buyButton.disabled = !canBuy();
   elements.openScratchButton.disabled = !canOpenScratch();
+  elements.claimButton.hidden = !hasClaimablePrize();
+  elements.modalClaimButton.hidden = !hasClaimablePrize();
   elements.claimButton.disabled = !canClaim();
   elements.modalClaimButton.disabled = !canClaim();
 
@@ -935,7 +1052,13 @@ function renderReactiveTrace() {
 
   const sourceContractLink = explorerAddressUrl(SCRATCH_CONFIG.sourceChain.blockExplorerUrl, SCRATCH_CONFIG.contracts.source);
   const sourceTxLink = sourceTxHash ? explorerTxUrl(SCRATCH_CONFIG.sourceChain.blockExplorerUrl, sourceTxHash) : null;
-  const reactiveContractLink = explorerAddressUrl(SCRATCH_CONFIG.reactiveChain?.blockExplorerUrl, SCRATCH_CONFIG.contracts.reactive);
+  const reactiveSenderAddress = SCRATCH_CONFIG.reactiveChain?.senderAddress ?? SCRATCH_CONFIG.contracts.reactiveSender ?? null;
+  const reactiveSenderLink = reactiveRvmUrl(SCRATCH_CONFIG.reactiveChain?.blockExplorerUrl, reactiveSenderAddress);
+  const reactiveContractLink = reactiveContractUrl(
+    SCRATCH_CONFIG.reactiveChain?.blockExplorerUrl,
+    reactiveSenderAddress,
+    SCRATCH_CONFIG.contracts.reactive,
+  );
   const gameContractLink = explorerAddressUrl(SCRATCH_CONFIG.destinationChain.blockExplorerUrl, SCRATCH_CONFIG.contracts.game);
   const openedTxLink = state.trace.openedTxHash ? explorerTxUrl(SCRATCH_CONFIG.destinationChain.blockExplorerUrl, state.trace.openedTxHash) : null;
   const vrfTxLink = state.trace.randomnessTxHash ? explorerTxUrl(SCRATCH_CONFIG.destinationChain.blockExplorerUrl, state.trace.randomnessTxHash) : null;
@@ -943,9 +1066,11 @@ function renderReactiveTrace() {
 
   const steps = [
     {
+      tone: "source",
       className: hasTicket ? "is-complete" : "",
       badgeClass: hasTicket ? "is-complete" : "",
       badge: hasTicket ? "Seen" : "Waiting",
+      kicker: "Purchase Event",
       title: "Source Chain",
       subtitle: "buyTicket()",
       links: [
@@ -954,20 +1079,27 @@ function renderReactiveTrace() {
       ],
     },
     {
+      tone: "reactive",
       className: hasMaterialized ? "is-complete" : hasTicket ? "is-active" : "",
       badgeClass: hasMaterialized ? "is-complete" : hasTicket ? "is-active" : "",
       badge: hasMaterialized ? "Relayed" : hasTicket ? "Routing" : "Standby",
+      kicker: "Callback Relay",
       title: "Reactive",
       subtitle: "react()",
       links: [
+        linkMarkup(reactiveSenderLink, "RVM"),
         linkMarkup(reactiveContractLink, "Contract"),
       ],
-      hint: !reactiveContractLink ? "Set reactive explorer URL to enable contract jump." : "",
+      hint: !reactiveSenderLink
+        ? "Set reactive senderAddress to jump to the relay sender identity on Reactscan."
+        : "RVM opens the deployer-matched ReactVM page. Contract opens the contract view inside that RVM on the configured Reactive explorer.",
     },
     {
+      tone: "destination",
       className: hasOpened ? "is-complete" : hasMaterialized ? "is-active" : "",
       badgeClass: hasOpened ? "is-complete" : hasMaterialized ? "is-active" : "",
       badge: hasOpened ? "Opened" : hasMaterialized ? "Minting" : "Standby",
+      kicker: "Materialize + Settle",
       title: "Destination",
       subtitle: "openTicket() / VRF / claim()",
       links: [
@@ -982,17 +1114,18 @@ function renderReactiveTrace() {
   elements.tracePanel.innerHTML = `
     <div class="trace-panel-head">
       <span class="trace-kicker">Source -> Reactive -> Destination</span>
-      <strong>${hasTicket ? `CARD #${state.latestTicketId.toString()}` : "NO ACTIVE CARD"}</strong>
+      <strong>${hasTicket ? `TICKET #${state.latestTicketId.toString()}` : "NO ACTIVE TICKET"}</strong>
     </div>
     <div class="trace-lane">
       ${steps.map((step, index) => `
-        <section class="trace-step ${step.className}">
+        <section class="trace-step trace-step-${step.tone} ${step.className}">
           <div class="trace-step-top">
             <div class="trace-step-head">
               <span class="trace-node">${traceNodeIcon(index)}</span>
-              <div>
+              <div class="trace-step-copy">
+                <span class="trace-step-kicker">${step.kicker}</span>
                 <strong>${step.title}</strong>
-                <span>${step.subtitle}</span>
+                <span class="trace-step-subtitle">${step.subtitle}</span>
               </div>
             </div>
             <span class="trace-badge ${step.badgeClass}">${step.badge}</span>
@@ -1006,39 +1139,45 @@ function renderReactiveTrace() {
 }
 
 function renderTimeline() {
+  const missedTicketSettled = isMissedTicketSettled();
+
   const items = [
     {
       title: "Ticket Bought",
-      body: state.latestTicketId ? "源链支付成功，Ticket ID 已生成。" : "当前还没有源链购票记录。",
+      body: state.latestTicketId ? "Source-chain payment confirmed; Ticket ID created." : "No source-chain purchase record yet.",
       complete: Boolean(state.latestTicketId && state.latestTicketId !== 0n),
       active: state.appStatus === APP_STATUS.BUYING,
     },
     {
-      title: "Card Materialized",
+      title: "Scratch Card Materialized",
       body: state.gameTicket?.player && state.gameTicket.player !== ZERO_ADDRESS
-        ? "目标链 Scratch Card 已经写入游戏合约。"
-        : "正在等待目标链生成 Scratch Card。",
+        ? "Destination-chain Scratch Card has been written into the game contract."
+        : "Waiting for the destination chain to generate the Scratch Card.",
       complete: Boolean(state.gameTicket?.player && state.gameTicket.player !== ZERO_ADDRESS),
       active: state.appStatus === APP_STATUS.BRIDGING,
     },
     {
       title: "VRF Settled",
       body: state.gameTicket?.status >= TICKET_STATUS.Ready
-        ? "随机结果已经上链，本轮奖金已锁定。"
-        : "正在等待 Chainlink VRF 返回随机数。",
+        ? "Random result is on-chain and the prize is now locked in."
+        : "Waiting for Chainlink VRF to return randomness.",
       complete: Boolean(state.gameTicket?.status >= TICKET_STATUS.Ready),
       active: state.appStatus === APP_STATUS.RANDOMIZING,
     },
     {
       title: "Scratch Opened",
-      body: scratch.revealed ? "奖面已经打开，可以查看最终结果。" : "打开 Card 后用鼠标拖动刮开奖面。",
+      body: scratch.revealed ? "The scratch layer is open. You can now view the final result." : "Open the Scratch Card and drag your mouse to scratch the surface.",
       complete: scratch.revealed,
       active: [APP_STATUS.READY, APP_STATUS.REVEALED].includes(state.appStatus),
     },
     {
-      title: "Prize Claimed",
-      body: state.gameTicket?.status === TICKET_STATUS.Claimed ? "本轮已经完成结算。" : "揭晓结果后可领取奖金。",
-      complete: state.gameTicket?.status === TICKET_STATUS.Claimed,
+      title: missedTicketSettled ? "Round Settled" : "Prize Claimed",
+      body: state.gameTicket?.status === TICKET_STATUS.Claimed
+        ? "This round is fully settled."
+        : missedTicketSettled
+          ? "No prize this round. Buy another ticket to start the next run."
+          : "Claim the prize after revealing the result.",
+      complete: state.gameTicket?.status === TICKET_STATUS.Claimed || missedTicketSettled,
       active: state.appStatus === APP_STATUS.CLAIMING,
     },
   ];
@@ -1057,7 +1196,7 @@ function renderTimeline() {
 function renderWinnerBoard() {
   if (!state.recentWinners.length) {
     elements.winnerCountBadge.textContent = "0 RECORDS";
-    elements.winnerList.innerHTML = '<div class="winner-entry winner-empty"><div class="winner-rank">--</div><div class="winner-meta"><span>BOARD EMPTY</span><strong>当前还没有已开奖的 Card 记录。</strong></div><div class="winner-payout"><span>Payout</span><strong>-</strong></div></div>';
+    elements.winnerList.innerHTML = '<div class="winner-entry winner-empty"><div class="winner-rank">--</div><div class="winner-meta"><span>BOARD EMPTY</span><strong>No scratched/revealed Scratch Card records yet.</strong></div><div class="winner-payout"><span>Payout</span><strong>-</strong></div></div>';
     return;
   }
 
@@ -1069,7 +1208,7 @@ function renderWinnerBoard() {
         <div class="winner-rank">#${winner.rank}</div>
         <div class="winner-meta">
           <span>${tier.label}</span>
-          <strong>${formatAddress(winner.player)} · CARD #${winner.ticketId.toString()}</strong>
+          <strong>${formatAddress(winner.player)} | TICKET #${winner.ticketId.toString()}</strong>
         </div>
         <div class="winner-payout">
           <span>${winner.claimed ? "CLAIMED" : "UNCLAIMED"}</span>
@@ -1093,7 +1232,7 @@ function headlineForStatus() {
     case APP_STATUS.BUYING:
       return "BUYING TICKET";
     case APP_STATUS.BRIDGING:
-      return "CARD MATERIALIZING";
+      return "SCRATCH CARD MATERIALIZING";
     case APP_STATUS.RANDOMIZING:
       return "VRF ROLLING";
     case APP_STATUS.READY:
@@ -1116,28 +1255,52 @@ async function fetchTicketTrace(ticketId) {
     return emptyTrace();
   }
 
+  const ticketKey = toTicketKey(ticketId);
+  const cached = state.traceCache.get(ticketKey);
+
   try {
+    const now = Date.now();
+    if (cached && now - cached.fetchedAt < TRACE_REFRESH_INTERVAL_MS) {
+      return cached.trace;
+    }
+
     const latestBlock = await state.destinationReadProvider.getBlockNumber();
-    const fromBlock = latestBlock > Number(TRACE_LOOKBACK_BLOCKS)
-      ? latestBlock - Number(TRACE_LOOKBACK_BLOCKS)
-      : 0;
+    const fromBlock = cached?.lastScannedBlock == null
+      ? latestBlock > Number(TRACE_LOOKBACK_BLOCKS)
+        ? latestBlock - Number(TRACE_LOOKBACK_BLOCKS)
+        : 0
+      : cached.lastScannedBlock + 1;
 
-    const [openedLogs, requestLogs, fulfilledLogs, claimedLogs] = await Promise.all([
-      state.gameContract.queryFilter(state.gameContract.filters.TicketOpened(ticketId), fromBlock, latestBlock),
-      state.gameContract.queryFilter(state.gameContract.filters.RandomnessRequested(null, ticketId), fromBlock, latestBlock),
-      state.gameContract.queryFilter(state.gameContract.filters.RandomnessFulfilled(null, ticketId), fromBlock, latestBlock),
-      state.gameContract.queryFilter(state.gameContract.filters.PrizeClaimed(ticketId), fromBlock, latestBlock),
-    ]);
+    const [openedLogs, requestLogs, fulfilledLogs, claimedLogs] = fromBlock <= latestBlock
+      ? await Promise.all([
+        state.gameContract.queryFilter(state.gameContract.filters.TicketOpened(ticketId), fromBlock, latestBlock),
+        state.gameContract.queryFilter(state.gameContract.filters.RandomnessRequested(null, ticketId), fromBlock, latestBlock),
+        state.gameContract.queryFilter(state.gameContract.filters.RandomnessFulfilled(null, ticketId), fromBlock, latestBlock),
+        state.gameContract.queryFilter(state.gameContract.filters.PrizeClaimed(ticketId), fromBlock, latestBlock),
+      ])
+      : [[], [], [], []];
 
-    return {
-      openedTxHash: openedLogs.at(-1)?.transactionHash ?? null,
-      randomnessTxHash: requestLogs.at(-1)?.transactionHash ?? fulfilledLogs.at(-1)?.transactionHash ?? null,
-      fulfilledTxHash: fulfilledLogs.at(-1)?.transactionHash ?? null,
-      claimedTxHash: claimedLogs.at(-1)?.transactionHash ?? null,
+    const trace = {
+      openedTxHash: openedLogs.at(-1)?.transactionHash ?? cached?.trace.openedTxHash ?? null,
+      randomnessTxHash:
+        requestLogs.at(-1)?.transactionHash
+        ?? fulfilledLogs.at(-1)?.transactionHash
+        ?? cached?.trace.randomnessTxHash
+        ?? null,
+      fulfilledTxHash: fulfilledLogs.at(-1)?.transactionHash ?? cached?.trace.fulfilledTxHash ?? null,
+      claimedTxHash: claimedLogs.at(-1)?.transactionHash ?? cached?.trace.claimedTxHash ?? null,
     };
+
+    state.traceCache.set(ticketKey, {
+      trace,
+      fetchedAt: now,
+      lastScannedBlock: latestBlock,
+    });
+
+    return trace;
   }
   catch {
-    return emptyTrace();
+    return cached?.trace ?? emptyTrace();
   }
 }
 
@@ -1154,7 +1317,7 @@ function signalCopy() {
     case APP_STATUS.RANDOMIZING:
       return "CHAINLINK VRF IS ROLLING THE RESULT";
     case APP_STATUS.READY:
-      return "RESULT LOCKED ONCHAIN, OPEN CARD TO SCRATCH";
+      return "RESULT LOCKED ONCHAIN, OPEN SCRATCH CARD TO SCRATCH";
     case APP_STATUS.REVEALED:
       return "RESULT REVEALED, CLAIM IF YOU HIT";
     case APP_STATUS.CLAIMING:
@@ -1169,7 +1332,7 @@ function signalCopy() {
 }
 
 function resultKicker() {
-  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "CARD LOCKED";
+  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "SCRATCH CARD LOCKED";
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) return "VRF PENDING";
   if (state.gameTicket.status === TICKET_STATUS.Claimed) return "PRIZE SETTLED";
   return scratch.revealed ? "RESULT LIVE" : "SCRATCH TO REVEAL";
@@ -1177,7 +1340,7 @@ function resultKicker() {
 
 function resultTitle() {
   if (!state.latestTicketId || state.latestTicketId === 0n) return "BUY YOUR FIRST TICKET";
-  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "CARD IS MATERIALIZING";
+  if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) return "SCRATCH CARD IS MATERIALIZING";
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) return "VRF IS ROLLING";
   if (!scratch.revealed) return "SCRATCH TO EXPOSE THE RESULT";
   return tierMeta().label;
@@ -1185,16 +1348,16 @@ function resultTitle() {
 
 function resultBody() {
   if (!state.latestTicketId || state.latestTicketId === 0n) {
-    return "先购买彩票，系统会在目标链生成对应的 Card 并等待开奖。";
+    return "Buy a ticket first. The system will create the matching Scratch Card on the destination chain and wait for the draw.";
   }
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
-    return "购票已经成功，目标链正在创建彩票，保持页面打开即可自动刷新。";
+    return "Purchase succeeded. The destination chain is creating the ticket - keep this page open for auto-refresh.";
   }
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
-    return "彩票已经生成，但最终奖级还在等待 Chainlink VRF 返回随机数。";
+    return "The ticket has been created, but the final prize tier is still waiting for Chainlink VRF randomness.";
   }
   if (!scratch.revealed) {
-    return "奖级已经在链上锁定，刮开动作只是把最终结果展示给你。";
+    return "The prize tier is already locked on-chain; scratching only reveals the final result to you.";
   }
   return tierMeta().accent;
 }
@@ -1204,13 +1367,16 @@ function machineCopy() {
     return "Connect wallet and press BUY TICKET to start this run.";
   }
   if (!state.gameTicket || state.gameTicket.player === ZERO_ADDRESS) {
-    return "Source buy confirmed. Waiting for the target-chain Card.";
+    return "Source buy confirmed. Waiting for the target-chain Scratch Card.";
   }
   if (state.gameTicket.status === TICKET_STATUS.PendingVRF) {
-    return "Card minted. Chainlink VRF is rolling the result.";
+    return "Scratch Card minted. Chainlink VRF is rolling the result.";
+  }
+  if (isMissedTicketSettled()) {
+    return "Result revealed. No prize this round. Press BUY TICKET for another run.";
   }
   if (state.gameTicket.status === TICKET_STATUS.Ready && !scratch.revealed) {
-    return "Open the Card and scratch with your mouse.";
+    return "Open the Scratch Card and scratch with your mouse.";
   }
   if (state.gameTicket.status === TICKET_STATUS.Claimed) {
     return "Prize claimed. Press BUY TICKET for another run.";
@@ -1306,7 +1472,7 @@ function truncateHash(value) {
 }
 
 function resolveChainName(chainId) {
-  return CHAIN_LOOKUP.get(chainId)?.name ?? "未知网络";
+  return CHAIN_LOOKUP.get(chainId)?.name ?? "Unknown network";
 }
 
 function emptyTrace() {
@@ -1328,6 +1494,43 @@ function explorerAddressUrl(baseUrl, address) {
   return `${baseUrl}/address/${address}`;
 }
 
+function reactiveRvmUrl(baseUrl, address) {
+  if (!baseUrl || !address) return null;
+  return `${baseUrl}/rvm/${address}`;
+}
+
+function mergeRecentWinnerLogs(logs) {
+  if (!logs.length) return;
+
+  const merged = new Map(state.recentWinnerLogs.map((log) => [winnerLogKey(log), log]));
+  for (const log of logs) {
+    merged.set(winnerLogKey(log), log);
+  }
+
+  state.recentWinnerLogs = [...merged.values()]
+    .sort(compareTraceLogs)
+    .slice(-MAX_RECENT_WINNER_LOGS);
+}
+
+function winnerLogKey(log) {
+  return `${log.transactionHash}:${Number(log.index ?? log.logIndex ?? 0)}`;
+}
+
+function compareTraceLogs(left, right) {
+  const leftBlock = Number(left.blockNumber ?? 0);
+  const rightBlock = Number(right.blockNumber ?? 0);
+  if (leftBlock !== rightBlock) return leftBlock - rightBlock;
+
+  const leftIndex = Number(left.index ?? left.logIndex ?? 0);
+  const rightIndex = Number(right.index ?? right.logIndex ?? 0);
+  return leftIndex - rightIndex;
+}
+
+function reactiveContractUrl(baseUrl, senderAddress, contractAddress) {
+  if (!baseUrl || !senderAddress || !contractAddress) return null;
+  return `${baseUrl}/address/${senderAddress}/contract/${contractAddress}`;
+}
+
 function linkMarkup(href, label) {
   if (!href) return "";
   return `<a class="trace-link" href="${href}" target="_blank" rel="noreferrer">${label}</a>`;
@@ -1335,21 +1538,34 @@ function linkMarkup(href, label) {
 
 function traceNodeIcon(index) {
   if (index === 0) {
-    return '<svg viewBox="0 0 24 24" role="presentation"><path d="M4 7h16v10H4z"/><path d="M8 4v6"/><path d="M16 4v6"/></svg>';
+    return '<svg viewBox="0 0 24 24" role="presentation"><path d="M7 6h10a2 2 0 0 1 2 2v2a2.5 2.5 0 0 0 0 4v2a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2v-2a2.5 2.5 0 0 0 0-4V8a2 2 0 0 1 2-2Z"/><path d="M9 9h6"/><path d="M9 15h4"/></svg>';
   }
   if (index === 1) {
-    return '<svg viewBox="0 0 24 24" role="presentation"><path d="M4 12h6"/><path d="M14 12h6"/><circle cx="12" cy="12" r="3"/></svg>';
+    return '<svg viewBox="0 0 24 24" role="presentation"><circle cx="12" cy="12" r="3.5"/><path d="M4.5 12H8"/><path d="M16 12h3.5"/><path d="M12 4.5V8"/><path d="M12 16v3.5"/><path d="m6.8 6.8 2.5 2.5"/><path d="m14.7 14.7 2.5 2.5"/><path d="m17.2 6.8-2.5 2.5"/><path d="m9.3 14.7-2.5 2.5"/></svg>';
   }
-  return '<svg viewBox="0 0 24 24" role="presentation"><path d="M5 5h14v14H5z"/><path d="M9 9h6"/><path d="M9 13h6"/><path d="M9 17h3"/></svg>';
+  return '<svg viewBox="0 0 24 24" role="presentation"><rect x="5" y="5" width="14" height="14" rx="3"/><path d="M9 9h6"/><path d="M9 13h4"/><path d="m15.4 15.4.8 1.7 1.9.3-1.4 1.3.3 1.9-1.6-.9-1.6.9.3-1.9-1.4-1.3 1.9-.3Z"/></svg>';
 }
 
 function persistScratchReveal(ticketId, revealed) {
-  if (ticketId === "0") return;
-  window.localStorage.setItem(`lucky-flux:${ticketId}`, revealed ? "1" : "0");
+  const storageKey = scratchStorageKey(ticketId);
+  if (!storageKey) return;
+  window.localStorage.setItem(storageKey, revealed ? "1" : "0");
 }
 
 function readScratchReveal(ticketId) {
-  return window.localStorage.getItem(`lucky-flux:${ticketId}`) === "1";
+  const storageKey = scratchStorageKey(ticketId);
+  if (!storageKey) return false;
+  return window.localStorage.getItem(storageKey) === "1";
+}
+
+function scratchStorageKey(ticketId) {
+  if (!ticketId || ticketId === "0") return null;
+
+  const sourceChainId = SCRATCH_CONFIG.sourceChain?.id ?? "source";
+  const destinationChainId = SCRATCH_CONFIG.destinationChain?.id ?? "destination";
+  const gameAddress = (SCRATCH_CONFIG.contracts.game ?? "game").toLowerCase();
+  const accountKey = (state.account ?? "anonymous").toLowerCase();
+  return `lucky-flux:${sourceChainId}:${destinationChainId}:${gameAddress}:${accountKey}:${ticketId}`;
 }
 
 function setAppStatus(status, detail) {
@@ -1393,4 +1609,13 @@ function resetSession(status, detail) {
 
 function getErrorMessage(error, fallback) {
   return error?.shortMessage || error?.reason || error?.message || fallback;
+}
+
+function isTransientRpcReadError(error) {
+  const message = `${error?.shortMessage ?? ""} ${error?.reason ?? ""} ${error?.message ?? ""}`.toLowerCase();
+  return message.includes("missing response for request")
+    || message.includes("timeout")
+    || message.includes("network error")
+    || message.includes("failed to fetch")
+    || message.includes("socket hang up");
 }

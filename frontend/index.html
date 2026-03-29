@@ -1,10 +1,10 @@
-﻿<!doctype html>
-<html lang="zh-CN">
+<!doctype html>
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>Lucky Scratch</title>
-    <link rel="stylesheet" href="./styles.css?v=20260324-9" />
+    <link rel="stylesheet" href="./styles.css?v=20260329-3" />
   </head>
   <body>
     <div class="noise"></div>
@@ -32,7 +32,7 @@
             <p class="eyebrow">JACKPOT MODE</p>
             <h2>BUY. SCRATCH. WIN.</h2>
             <p class="hero-body">
-              在源链买票后，Reactive 自动把事件送到目标链，Chainlink VRF 定奖，刮开后直接 Claim Prize。
+              Buy on the source chain, let Reactive forward the event to the destination chain, let Chainlink VRF decide the prize, then scratch and claim directly.
             </p>
             <div class="hero-tags">
               <span class="hero-tag">Reactive</span>
@@ -41,7 +41,7 @@
             </div>
             <div class="hero-actions">
               <button id="buyButton" class="button button-primary">BUY TICKET</button>
-              <button id="openScratchButton" class="button button-secondary" disabled>OPEN CARD</button>
+              <button id="openScratchButton" class="button button-secondary" disabled>OPEN SCRATCH CARD</button>
             </div>
           </div>
 
@@ -72,8 +72,8 @@
                   <path d="M57 58h9" />
                 </svg>
               </div>
-              <p class="ticket-mini-kicker">LIVE CARD</p>
-              <strong id="machineTicketTitle">NO ACTIVE CARD</strong>
+              <p class="ticket-mini-kicker">LIVE SCRATCH CARD</p>
+              <strong id="machineTicketTitle">NO ACTIVE TICKET</strong>
               <p id="machineTicketBody">Connect wallet and press BUY TICKET to start this run.</p>
               <div class="machine-pills">
                 <span id="machineStatusPill" class="pill">IDLE</span>
@@ -90,19 +90,19 @@
                 <p class="eyebrow">LIVE FLOW</p>
                 <h3 id="statusHeadline">CONNECT WALLET</h3>
               </div>
-              <button id="refreshButton" class="icon-button" aria-label="刷新状态">
+              <button id="refreshButton" class="icon-button" aria-label="Refresh status">
                 <svg viewBox="0 0 24 24" role="presentation">
                   <path d="M20 12a8 8 0 1 1-2.34-5.66" />
                   <path d="M20 4v6h-6" />
                 </svg>
               </button>
             </div>
-            <p id="statusMessage" class="action-copy">连接钱包后即可查看你最近一张彩票的链上状态。</p>
-            <div class="signal-strip">
-              <span class="signal-dot"></span>
-              <strong id="signalLabel">BUY · REACTIVE · VRF · CLAIM</strong>
-            </div>
+            <p id="statusMessage" class="action-copy">Connect your wallet to view the on-chain status of your latest ticket.</p>
             <div class="flow-tools">
+              <div class="signal-strip">
+                <span class="signal-dot"></span>
+                <strong id="signalLabel">BUY | REACTIVE | VRF | CLAIM</strong>
+              </div>
               <div id="traceAnchor" class="trace-anchor">
                 <button
                   id="traceToggleButton"
@@ -142,14 +142,14 @@
           <div class="panel-headline">
             <div>
               <p class="eyebrow">LIVE TICKET</p>
-              <h3 id="ticketPanelTitle">NO CARD YET</h3>
+              <h3 id="ticketPanelTitle">NO TICKET YET</h3>
             </div>
-            <span id="ticketBadge" class="badge">NO CARD</span>
+            <span id="ticketBadge" class="badge">NO TICKET</span>
           </div>
 
           <div class="ticket-meta-grid">
             <div>
-              <span>Card ID</span>
+              <span>Ticket ID</span>
               <strong id="ticketIdValue">-</strong>
             </div>
             <div>
@@ -224,25 +224,27 @@
     <div id="scratchModal" class="modal hidden" aria-hidden="true">
       <div class="modal-backdrop" id="modalBackdrop"></div>
       <div class="modal-card">
-        <button id="closeModalButton" class="modal-close" aria-label="关闭">
-          <svg viewBox="0 0 24 24" role="presentation">
-            <path d="M6 6 18 18" />
-            <path d="M18 6 6 18" />
-          </svg>
-        </button>
         <div class="modal-header">
           <div>
             <p class="eyebrow">SCRATCH CARD</p>
-            <h3 id="modalTicketTitle">CARD LOCKED</h3>
+            <h3 id="modalTicketTitle">TICKET LOCKED</h3>
           </div>
-          <span id="modalStatusPill" class="pill">IDLE</span>
+          <div class="modal-header-actions">
+            <span id="modalStatusPill" class="pill">IDLE</span>
+            <button id="closeModalButton" class="modal-close" aria-label="Close">
+              <svg viewBox="0 0 24 24" role="presentation">
+                <path d="M6 6 18 18" />
+                <path d="M18 6 6 18" />
+              </svg>
+            </button>
+          </div>
         </div>
 
         <div class="ticket-stage">
           <div class="ticket-underlay">
             <p class="underlay-kicker" id="resultKicker">WAITING</p>
             <h4 id="resultTitle">BUY YOUR FIRST TICKET</h4>
-            <p id="resultBody">当卡片进入可刮开状态后，用鼠标在涂层上拖动即可查看结果。</p>
+            <p id="resultBody">Once the card becomes scratchable, drag your mouse over the coating to reveal the result.</p>
             <div class="underlay-stats">
               <div>
                 <span>Random Word</span>
@@ -258,7 +260,7 @@
               </div>
             </div>
           </div>
-          <canvas id="scratchCanvas" width="880" height="520" aria-label="刮刮乐彩票"></canvas>
+          <canvas id="scratchCanvas" width="880" height="520" aria-label="Scratch-off lottery ticket"></canvas>
         </div>
 
         <div class="modal-footer">
@@ -273,6 +275,6 @@
       </div>
     </div>
 
-    <script type="module" src="./app.js?v=20260324-11"></script>
+    <script type="module" src="./app.js?v=20260329-7"></script>
   </body>
 </html>
